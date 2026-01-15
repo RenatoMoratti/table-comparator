@@ -1,0 +1,739 @@
+{% extends "base.html" %}
+
+{% block title %}Tables - Table Comparator{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0"><i class="fas fa-table me-2"></i>Table Management</h4>
+            <a href="{{ url_for('compare_page') }}" class="btn btn-outline-secondary"><i class="fas fa-arrow-left me-1"></i> Back to Compare</a>
+        </div>
+    </div>
+    <div class="col-12">
+        <div class="card mb-3">
+            <div class="card-header bg-primary text-white">
+                <h6 class="mb-0"><i class="fas fa-plus me-2"></i>Add New Table</h6>
+            </div>
+            <div class="card-body">
+                <form id="addTableForm">
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Table Name
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" title="Full table name including schema"></i>
+                                </label>
+                                <input type="text" class="form-control" id="newTableName" placeholder="e.g., schema.table_name" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Display Name
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" title="Friendly name for display"></i>
+                                </label>
+                                <input type="text" class="form-control" id="newDisplayName" placeholder="e.g., Customer Dimension" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">PROD Primary Keys
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" title="Comma-separated primary keys for PROD"></i>
+                                </label>
+                                <input type="text" class="form-control" id="newProdPrimaryKeys" placeholder="e.g., PK_Customer,SK_Account" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">DEV Primary Keys
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" title="Comma-separated primary keys for DEV"></i>
+                                </label>
+                                <input type="text" class="form-control" id="newDevPrimaryKeys" placeholder="e.g., idCustomer,idAccount" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-md-12">
+                            <div class="mb-3">
+                                <label class="form-label">Ignored Columns (pipe-separated)
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" title="Use | to separate columns to ignore"></i>
+                                </label>
+                                <input class="form-control" id="newIgnoredColumns" placeholder="__processing_timestamp_utc | __year | __month">
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-plus me-1"></i>Add Table
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center">
+                    <h6 class="mb-0 me-3"><i class="fas fa-list me-2"></i>Existing Tables</h6>
+                    <!-- Pagination Controls -->
+                    <div class="btn-group btn-group-sm" role="group" aria-label="Pagination">
+                        <button type="button" class="btn btn-outline-light" id="prevPage" onclick="changePage(-1)">
+                            <i class="fas fa-chevron-left"></i> Prev
+                        </button>
+                        <span class="btn btn-outline-light disabled" id="pageInfo">Page 1</span>
+                        <button type="button" class="btn btn-outline-light" id="nextPage" onclick="changePage(1)">
+                            Next <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="input-group" style="width: 300px;">
+                    <span class="input-group-text"><i class="fas fa-search"></i></span>
+                    <input type="text" class="form-control" id="tableSearchInput" placeholder="Search tables...">
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="existingTablesList"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Table Modal -->
+<div class="modal fade" id="editTableModal" tabindex="-1" aria-labelledby="editTableModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editTableModalLabel">
+                    <i class="fas fa-edit me-2"></i>Edit Table
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="editTableForm">
+                <div class="modal-body">
+                    <input type="hidden" id="editOriginalTableName" />
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Table Name
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" title="Full table name including schema"></i>
+                                </label>
+                                <input type="text" class="form-control" id="editTableName" placeholder="e.g., schema.table_name" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Display Name
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" title="Friendly name for display"></i>
+                                </label>
+                                <input type="text" class="form-control" id="editDisplayName" placeholder="e.g., Customer Dimension" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">PROD Primary Keys
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" title="Comma-separated primary keys for PROD"></i>
+                                </label>
+                                <input type="text" class="form-control" id="editProdPrimaryKeys" placeholder="e.g., PK_Customer,SK_Account" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">DEV Primary Keys
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" title="Comma-separated primary keys for DEV"></i>
+                                </label>
+                                <input type="text" class="form-control" id="editDevPrimaryKeys" placeholder="e.g., idCustomer,idAccount" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-12">
+                            <div class="mb-3">
+                                <label class="form-label">Ignored Columns (pipe-separated)
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" title="Use | to separate columns to ignore"></i>
+                                </label>
+                                <input type="text" class="form-control" id="editIgnoredColumns" placeholder="__processing_timestamp_utc | __year | __month">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                        <i class="fas fa-times me-1"></i>Cancel
+                    </button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-1"></i>Save Changes
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Custom Modal (Backup if Bootstrap fails) -->
+<div id="customEditModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 99999; padding-top: 2rem;">
+    <div style="position: relative; top: 0; left: 50%; transform: translateX(-50%); background: white; border-radius: 12px; width: 90%; max-width: 800px; max-height: calc(100vh - 4rem); overflow-y: auto; box-shadow: 0 25px 50px rgba(0,0,0,0.3);">
+        <div style="background: linear-gradient(135deg, #14296e 0%, #183d8d 100%); color: white; padding: 0.8rem 1rem; border-radius: 12px 12px 0 0; display: flex; justify-content: space-between; align-items: center;">
+            <h5 style="margin: 0; font-weight: 600; font-size: 1rem;"><i class="fas fa-edit me-2"></i>Edit Table</h5>
+            <button type="button" onclick="closeCustomModal()" style="background: rgba(255,255,255,0.2); border: none; color: white; border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 18px;">&times;</button>
+        </div>
+        <form id="customEditForm" style="padding: 1rem;">
+            <input type="hidden" id="customEditOriginalTableName" />
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-bottom: 0.8rem;">
+                <div>
+                    <label style="display: block; margin-bottom: 0.3rem; font-weight: 500; color: #374151; font-size: 0.8rem;">Table Name</label>
+                    <input type="text" id="customEditTableName" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.85rem;" required>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 0.3rem; font-weight: 500; color: #374151; font-size: 0.8rem;">Display Name</label>
+                    <input type="text" id="customEditDisplayName" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.85rem;" required>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 0.3rem; font-weight: 500; color: #374151; font-size: 0.8rem;">PROD Primary Keys</label>
+                    <input type="text" id="customEditProdPrimaryKeys" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.85rem;" required>
+                </div>
+                <div>
+                    <label style="display: block; margin-bottom: 0.3rem; font-weight: 500; color: #374151; font-size: 0.8rem;">DEV Primary Keys</label>
+                    <input type="text" id="customEditDevPrimaryKeys" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.85rem;" required>
+                </div>
+            </div>
+            <div style="margin-bottom: 0.8rem;">
+                <label style="display: block; margin-bottom: 0.3rem; font-weight: 500; color: #374151; font-size: 0.8rem;">Ignored Columns (pipe-separated)</label>
+                <input type="text" id="customEditIgnoredColumns" style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.85rem;">
+            </div>
+            <div style="display: flex; justify-content: flex-end; gap: 0.5rem; padding-top: 0.8rem; border-top: 1px solid #e5e7eb;">
+                <button type="button" onclick="closeCustomModal()" style="background: #6b7280; color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">
+                    <i class="fas fa-times me-1"></i>Cancel
+                </button>
+                <button type="submit" style="background: linear-gradient(135deg, #14296e 0%, #183d8d 100%); color: white; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">
+                    <i class="fas fa-save me-1"></i>Save Changes
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let availableTables = [];
+let currentPage = 1;
+let tablesPerPage = 50;
+let filteredTables = [];
+
+function loadExistingTables() {
+    fetch('/api/tables')
+        .then(response => response.json())
+        .then(tables => {
+            availableTables = tables.map(t => [
+                t.table_name, t.display_name, t.prod_primary_keys, t.dev_primary_keys, t.ignored_columns
+            ]);
+            displayExistingTables(tables);
+        })
+        .catch(error => {
+            console.error('Error loading tables:', error);
+            alert('Error loading tables');
+        });
+}
+
+function displayExistingTables(tables, searchTerm = '') {
+    const container = document.getElementById('existingTablesList');
+    
+    // Filter tables based on search term
+    if (searchTerm) {
+        filteredTables = tables.filter(table => 
+            table.table_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            table.display_name.toLowerCase().includes(searchTerm.toLowerCase())
+        );
+    } else {
+        filteredTables = tables;
+    }
+    
+    // Calculate pagination
+    const totalPages = Math.ceil(filteredTables.length / tablesPerPage);
+    const startIndex = (currentPage - 1) * tablesPerPage;
+    const endIndex = startIndex + tablesPerPage;
+    const paginatedTables = filteredTables.slice(startIndex, endIndex);
+    
+    // Update pagination controls
+    updatePaginationControls(totalPages);
+    
+    if (paginatedTables.length === 0) {
+        if (searchTerm) {
+            container.innerHTML = '<p class="text-muted">No tables found matching your search.</p>';
+        } else {
+            container.innerHTML = '<p class="text-muted">No tables configured.</p>';
+        }
+        return;
+    }
+    
+    let html = '';
+    paginatedTables.forEach((table) => {
+        html += `
+            <div class="table-item border rounded p-3 mb-2" data-table-name="${table.table_name}">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="flex-grow-1">
+                        <h6 class="mb-1">${table.display_name}</h6>
+                        <p class="text-muted mb-1"><small>${table.table_name}</small></p>
+                        <p class="mb-1"><strong>PROD Primary Keys:</strong> ${table.prod_primary_keys}</p>
+                        <p class="mb-1"><strong>DEV Primary Keys:</strong> ${table.dev_primary_keys}</p>
+                        <p class="mb-0"><strong>Ignored Columns:</strong> ${table.ignored_columns.replace(/\n/g, '|') || 'None'}</p>
+                    </div>
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="editTable('${table.table_name}')">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteTable('${table.table_name}')">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
+    
+    // Show pagination info
+    const showing = `Showing ${startIndex + 1}-${Math.min(endIndex, filteredTables.length)} of ${filteredTables.length} tables`;
+    if (document.getElementById('paginationInfo')) {
+        document.getElementById('paginationInfo').textContent = showing;
+    }
+}
+
+function updatePaginationControls(totalPages) {
+    const prevBtn = document.getElementById('prevPage');
+    const nextBtn = document.getElementById('nextPage');
+    const pageInfo = document.getElementById('pageInfo');
+    
+    // Update page info
+    pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+    
+    // Enable/disable buttons
+    prevBtn.disabled = currentPage <= 1;
+    nextBtn.disabled = currentPage >= totalPages;
+    
+    // Update button classes
+    if (prevBtn.disabled) {
+        prevBtn.classList.add('disabled');
+    } else {
+        prevBtn.classList.remove('disabled');
+    }
+    
+    if (nextBtn.disabled) {
+        nextBtn.classList.add('disabled');
+    } else {
+        nextBtn.classList.remove('disabled');
+    }
+}
+
+function changePage(direction) {
+    const totalPages = Math.ceil(filteredTables.length / tablesPerPage);
+    const newPage = currentPage + direction;
+    
+    if (newPage >= 1 && newPage <= totalPages) {
+        currentPage = newPage;
+        displayExistingTables(availableTables.map(t => ({
+            table_name: t[0],
+            display_name: t[1],
+            prod_primary_keys: t[2],
+            dev_primary_keys: t[3],
+            ignored_columns: t[4]
+        })), document.getElementById('tableSearchInput').value);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadExistingTables();
+    document.getElementById('addTableForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const tableData = {
+            table_name: document.getElementById('newTableName').value,
+            display_name: document.getElementById('newDisplayName').value,
+            prod_primary_keys: document.getElementById('newProdPrimaryKeys').value,
+            dev_primary_keys: document.getElementById('newDevPrimaryKeys').value,
+            ignored_columns: document.getElementById('newIgnoredColumns').value
+        };
+        fetch('/api/tables', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tableData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Show success message
+                const alertHtml = `
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        <i class="fas fa-check-circle me-2"></i>
+                        <strong>Success!</strong> Table added successfully.
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `;
+                document.querySelector('.container-fluid').insertAdjacentHTML('afterbegin', alertHtml);
+                
+                document.getElementById('addTableForm').reset();
+                loadExistingTables();
+                
+                // Auto-remove alert after 5 seconds
+                setTimeout(() => {
+                    const alert = document.querySelector('.alert-success');
+                    if (alert) alert.remove();
+                }, 5000);
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Error adding table:', error);
+            alert('Error adding table');
+        });
+    });
+
+    document.getElementById('tableSearchInput').addEventListener('keyup', function() {
+        const searchTerm = this.value.toLowerCase();
+        currentPage = 1; // Reset to first page when searching
+        displayExistingTables(availableTables.map(t => ({
+            table_name: t[0],
+            display_name: t[1],
+            prod_primary_keys: t[2],
+            dev_primary_keys: t[3],
+            ignored_columns: t[4]
+        })), searchTerm);
+    });
+
+    // Handle edit table form submission
+    document.getElementById('editTableForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        submitEditForm('bootstrap');
+    });
+
+    // Handle custom edit table form submission
+    document.getElementById('customEditForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        submitEditForm('custom');
+    });
+});
+
+function submitEditForm(modalType) {
+    let originalTableName, payload;
+    
+    if (modalType === 'custom') {
+        originalTableName = document.getElementById('customEditOriginalTableName').value;
+        payload = {
+            table_name: document.getElementById('customEditTableName').value,
+            display_name: document.getElementById('customEditDisplayName').value,
+            prod_primary_keys: document.getElementById('customEditProdPrimaryKeys').value,
+            dev_primary_keys: document.getElementById('customEditDevPrimaryKeys').value,
+            ignored_columns: document.getElementById('customEditIgnoredColumns').value
+        };
+    } else {
+        originalTableName = document.getElementById('editOriginalTableName').value;
+        payload = {
+            table_name: document.getElementById('editTableName').value,
+            display_name: document.getElementById('editDisplayName').value,
+            prod_primary_keys: document.getElementById('editProdPrimaryKeys').value,
+            dev_primary_keys: document.getElementById('editDevPrimaryKeys').value,
+            ignored_columns: document.getElementById('editIgnoredColumns').value
+        };
+    }
+    
+    fetch(`/api/tables/${encodeURIComponent(originalTableName)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Hide modal
+            if (modalType === 'custom') {
+                closeCustomModal();
+            } else {
+                const modal = bootstrap.Modal.getInstance(document.getElementById('editTableModal'));
+                if (modal) modal.hide();
+            }
+            
+            // Show success message
+            const alertHtml = `
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <i class="fas fa-check-circle me-2"></i>
+                    <strong>Success!</strong> Table updated successfully.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+            `;
+            document.querySelector('.container-fluid').insertAdjacentHTML('afterbegin', alertHtml);
+            
+            // Reload tables
+            loadExistingTables();
+            
+            // Auto-remove alert after 5 seconds
+            setTimeout(() => {
+                const alert = document.querySelector('.alert-success');
+                if (alert) alert.remove();
+            }, 5000);
+        } else {
+            alert('Error: ' + data.error);
+        }
+    })
+    .catch(error => {
+        console.error('Error updating table:', error);
+        alert('Error updating table');
+    });
+}
+
+function editTable(tableName) {
+    const table = availableTables.find(t => t[0] === tableName);
+    if (!table) return;
+    
+    console.log('Opening edit modal for:', tableName);
+    
+    // Try Bootstrap modal first
+    try {
+        openBootstrapModal(table);
+    } catch (error) {
+        console.warn('Bootstrap modal failed, using custom modal:', error);
+        openCustomModal(table);
+    }
+}
+
+function editTable(tableName) {
+    const table = availableTables.find(t => t[0] === tableName);
+    if (!table) return;
+    
+    console.log('Opening edit modal for:', tableName);
+    
+    // Use custom modal as primary since it's more reliable
+    openCustomModal(table);
+}
+
+function openBootstrapModal(table) {
+    // Clean up any existing modals
+    const existingModals = document.querySelectorAll('.modal');
+    existingModals.forEach(modal => {
+        const instance = bootstrap.Modal.getInstance(modal);
+        if (instance) {
+            instance.hide();
+            instance.dispose();
+        }
+    });
+    
+    // Remove backdrops
+    document.querySelectorAll('.modal-backdrop').forEach(backdrop => backdrop.remove());
+    
+    setTimeout(() => {
+        const modalElement = document.getElementById('editTableModal');
+        
+        // Populate modal
+        document.getElementById('editOriginalTableName').value = table[0];
+        document.getElementById('editTableName').value = table[0];
+        document.getElementById('editDisplayName').value = table[1];
+        document.getElementById('editProdPrimaryKeys').value = table[2];
+        document.getElementById('editDevPrimaryKeys').value = table[3];
+        document.getElementById('editIgnoredColumns').value = (table[4] || '').replace(/\n/g, ' | ').replace(/\s*\|\s*/g, ' | ');
+        
+        // Show modal manually
+        modalElement.style.display = 'flex';
+        modalElement.classList.add('show');
+        modalElement.style.zIndex = '999999';
+        
+        // Focus first input
+        setTimeout(() => {
+            document.getElementById('editTableName').focus();
+        }, 100);
+        
+    }, 50);
+}
+
+function openCustomModal(table) {
+    console.log('Opening custom modal');
+    
+    // Hide Bootstrap modal if visible
+    const bootstrapModal = document.getElementById('editTableModal');
+    if (bootstrapModal) {
+        bootstrapModal.style.display = 'none';
+    }
+    
+    // Populate custom modal
+    document.getElementById('customEditOriginalTableName').value = table[0];
+    document.getElementById('customEditTableName').value = table[0];
+    document.getElementById('customEditDisplayName').value = table[1];
+    document.getElementById('customEditProdPrimaryKeys').value = table[2];
+    document.getElementById('customEditDevPrimaryKeys').value = table[3];
+    document.getElementById('customEditIgnoredColumns').value = (table[4] || '').replace(/\n/g, ' | ').replace(/\s*\|\s*/g, ' | ');
+    
+    // Show custom modal
+    const customModal = document.getElementById('customEditModal');
+    customModal.style.display = 'block';
+    
+    // Focus first input
+    setTimeout(() => {
+        document.getElementById('customEditTableName').focus();
+    }, 100);
+}
+
+function closeCustomModal() {
+    document.getElementById('customEditModal').style.display = 'none';
+}
+
+function closeBootstrapModal() {
+    const modalElement = document.getElementById('editTableModal');
+    modalElement.style.display = 'none';
+    modalElement.classList.remove('show');
+    
+    // Clean up
+    document.querySelectorAll('.modal-backdrop').forEach(backdrop => backdrop.remove());
+    document.body.classList.remove('modal-open');
+    document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
+}
+
+// Add event listeners for Bootstrap modal close buttons
+document.addEventListener('DOMContentLoaded', function() {
+    // Close buttons for Bootstrap modal
+    const bootstrapModal = document.getElementById('editTableModal');
+    bootstrapModal.addEventListener('click', function(e) {
+        if (e.target === bootstrapModal || e.target.classList.contains('btn-close') || e.target.getAttribute('data-bs-dismiss') === 'modal') {
+            closeBootstrapModal();
+        }
+    });
+});
+
+function deleteTable(tableName) {
+    if (!confirm(`Are you sure you want to delete the table "${tableName}"?`)) return;
+    
+    fetch(`/api/tables/${encodeURIComponent(tableName)}`, { method: 'DELETE' })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Show success message
+                const alertHtml = `
+                    <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                        <i class="fas fa-trash me-2"></i>
+                        <strong>Deleted!</strong> Table "${tableName}" has been removed.
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                `;
+                document.querySelector('.container-fluid').insertAdjacentHTML('afterbegin', alertHtml);
+                
+                loadExistingTables();
+                
+                // Auto-remove alert after 5 seconds
+                setTimeout(() => {
+                    const alert = document.querySelector('.alert-warning');
+                    if (alert) alert.remove();
+                }, 5000);
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => {
+            console.error('Error deleting table:', error);
+            alert('Error deleting table');
+        });
+}
+</script>
+
+<!-- Debug and Enhancement Script -->
+<script>
+// Additional modal debugging and fixes
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Tables page loaded - Setting up modal debugging');
+    
+    // Add click event listener to all edit buttons for debugging
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.btn-outline-primary')) {
+            console.log('Edit button clicked');
+        }
+    });
+    
+    // Ensure modals are properly handled
+    const modalElement = document.getElementById('editTableModal');
+    if (modalElement) {
+        console.log('Edit modal found in DOM');
+        
+        // Add event listeners
+        modalElement.addEventListener('show.bs.modal', function () {
+            console.log('Modal about to show');
+        });
+        
+        modalElement.addEventListener('shown.bs.modal', function () {
+            console.log('Modal shown successfully');
+        });
+        
+        modalElement.addEventListener('hide.bs.modal', function () {
+            console.log('Modal about to hide');
+        });
+        
+        modalElement.addEventListener('hidden.bs.modal', function () {
+            console.log('Modal hidden successfully');
+        });
+    }
+    
+    // Override default edit function with enhanced error handling
+    window.editTableEnhanced = function(tableName) {
+        console.log('Enhanced edit function called for:', tableName);
+        
+        try {
+            const table = availableTables.find(t => t[0] === tableName);
+            if (!table) {
+                console.error('Table not found:', tableName);
+                return;
+            }
+            
+            console.log('Table data found:', table);
+            
+            // Remove any existing modal instances
+            const existingModals = document.querySelectorAll('.modal.show');
+            existingModals.forEach(modal => {
+                const instance = bootstrap.Modal.getInstance(modal);
+                if (instance) {
+                    instance.hide();
+                }
+            });
+            
+            // Clear any existing backdrops
+            const existingBackdrops = document.querySelectorAll('.modal-backdrop');
+            existingBackdrops.forEach(backdrop => backdrop.remove());
+            
+            // Reset body classes
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            document.body.style.paddingRight = '';
+            
+            setTimeout(() => {
+                const modalElement = document.getElementById('editTableModal');
+                
+                // Populate form
+                document.getElementById('editOriginalTableName').value = table[0];
+                document.getElementById('editTableName').value = table[0];
+                document.getElementById('editDisplayName').value = table[1];
+                document.getElementById('editProdPrimaryKeys').value = table[2];
+                document.getElementById('editDevPrimaryKeys').value = table[3];
+                document.getElementById('editIgnoredColumns').value = (table[4] || '').replace(/\n/g, ' | ').replace(/\s*\|\s*/g, ' | ');
+                
+                console.log('Form populated');
+                
+                // Dispose existing instance
+                const existingInstance = bootstrap.Modal.getInstance(modalElement);
+                if (existingInstance) {
+                    existingInstance.dispose();
+                }
+                
+                // Create and show modal
+                const modal = new bootstrap.Modal(modalElement, {
+                    backdrop: true,
+                    keyboard: true,
+                    focus: true
+                });
+                
+                console.log('Modal instance created');
+                modal.show();
+                console.log('Modal show() called');
+                
+            }, 200);
+            
+        } catch (error) {
+            console.error('Error in enhanced edit function:', error);
+        }
+    };
+    
+    // Add test function for manual testing
+    window.testModal = function() {
+        console.log('Testing modal manually');
+        const modalElement = document.getElementById('editTableModal');
+        const modal = new bootstrap.Modal(modalElement);
+        modal.show();
+    };
+    
+    console.log('Modal debugging setup complete');
+});
+</script>
+{% endblock %}
+
+

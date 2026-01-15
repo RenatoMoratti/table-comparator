@@ -1,0 +1,1275 @@
+{% extends "base.html" %}
+
+{% block title %}Comparison Results{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <!-- Status Card -->
+        <div class="card mb-4" id="statusCard">
+            <div class="card-header bg-success text-white">
+                <h4 class="mb-0">
+                    <i class="fas fa-clock me-2"></i>
+                    Comparison Status
+                </h4>
+            </div>
+            <div class="card-body text-center">
+                <div class="spinner-border text-primary" role="status" id="loadingSpinner">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <h5 class="mt-3" id="statusText">Initializing comparison...</h5>
+                <div class="progress mt-3" style="height: 25px;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                         role="progressbar" style="width: 0%" id="progressBar">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Card -->
+        <div class="card" id="resultsCard" style="display: none;">
+            <div class="card-header" id="resultsHeader">
+                <h4 class="mb-0" id="resultsTitle">
+                    <i class="fas fa-chart-bar me-2"></i>
+                    Comparison Results
+                </h4>
+            </div>
+            <div class="card-body" id="resultsBody">
+                <!-- Results will be populated here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Queries Modal -->
+<div class="modal fade" id="queriesModal" tabindex="-1" aria-labelledby="queriesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="queriesModalLabel">
+                    <i class="fas fa-database me-2"></i>
+                    Executed Queries
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="queriesModalBody">
+                <!-- Queries will be populated here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const comparisonId = '{{ comparison_id }}';
+let statusInterval;
+let durationInterval;
+
+function checkStatus() {
+    fetch(`/api/status/${comparisonId}`)
+        .then(response => response.json())
+        .then(data => {
+            window.currentStatusData = data; // Store for real-time updates
+            updateStatus(data);
+            
+            if (data.status === 'completed' || data.status === 'cancelled') {
+                clearInterval(statusInterval);
+                clearInterval(durationInterval);
+                loadResults();
+            } else if (data.status === 'error') {
+                clearInterval(statusInterval);
+                clearInterval(durationInterval);
+                showError(data.progress);
+            }
+        })
+        .catch(error => {
+            console.error('Error checking status:', error);
+            clearInterval(statusInterval);
+            clearInterval(durationInterval);
+            showError('Failed to check comparison status');
+        });
+}
+
+function updateStatus(data) {
+    const statusText = document.getElementById('statusText');
+    const progressBar = document.getElementById('progressBar');
+    
+    statusText.textContent = data.progress;
+    
+    // Update progress bar based on status and table progress
+    let progress = 0;
+    if (data.status === 'running' && data.table_list) {
+        const completedTables = data.table_list.filter(t => t.status === 'identical' || t.status === 'different' || t.status === 'error').length;
+        progress = (completedTables / data.table_list.length) * 100;
+    } else if (data.status === 'completed' || data.status === 'cancelled') {
+        progress = 100;
+    } else if (data.status === 'error') {
+        progress = 100;
+        progressBar.classList.add('bg-danger');
+    }
+    
+    progressBar.style.width = progress + '%';
+    
+    // Update cancel button visibility
+    updateCancelButton(data);
+    
+    // Update detailed table status if available
+    if (data.table_list) {
+        updateTableStatusDisplay(data);
+    }
+}
+
+function updateCancelButton(data) {
+    let cancelButton = document.getElementById('cancelButton');
+    
+    if (data.status === 'running' && data.can_cancel) {
+        if (!cancelButton) {
+            // Create cancel button
+            const statusCard = document.getElementById('statusCard');
+            const cardBody = statusCard.querySelector('.card-body');
+            
+            cancelButton = document.createElement('button');
+            cancelButton.id = 'cancelButton';
+            cancelButton.className = 'btn btn-danger mt-3';
+            cancelButton.innerHTML = '<i class="fas fa-stop me-2"></i>Cancel Comparison';
+            cancelButton.onclick = cancelComparison;
+            
+            cardBody.appendChild(cancelButton);
+        }
+    } else if (cancelButton) {
+        // Remove or disable cancel button
+        if (data.status === 'cancelled') {
+            cancelButton.innerHTML = '<i class="fas fa-check me-2"></i>Cancelled';
+            cancelButton.disabled = true;
+            cancelButton.className = 'btn btn-secondary mt-3';
+        } else {
+            cancelButton.remove();
+        }
+    }
+}
+
+function cancelComparison() {
+    if (!confirm('Are you sure you want to cancel this comparison? You will see results for tables that have already been processed.')) {
+        return;
+    }
+    
+    const cancelButton = document.getElementById('cancelButton');
+    cancelButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Cancelling...';
+    cancelButton.disabled = true;
+    
+    fetch(`/api/cancel/${comparisonId}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            cancelButton.innerHTML = '<i class="fas fa-check me-2"></i>Cancellation Requested';
+            cancelButton.className = 'btn btn-warning mt-3';
+        } else {
+            alert('Failed to cancel: ' + data.error);
+            cancelButton.innerHTML = '<i class="fas fa-stop me-2"></i>Cancel Comparison';
+            cancelButton.disabled = false;
+        }
+    })
+    .catch(error => {
+        console.error('Error cancelling comparison:', error);
+        alert('Failed to cancel comparison');
+        cancelButton.innerHTML = '<i class="fas fa-stop me-2"></i>Cancel Comparison';
+        cancelButton.disabled = false;
+    });
+}
+
+// Resto das funções permanecem iguais...
+function updateTableStatusDisplay(data) {
+    let tableStatusHTML = '';
+    
+    if (data.table_list && data.table_list.length > 0) {
+        tableStatusHTML = `
+            <div class="mt-4">
+                <h6><i class="fas fa-list me-2"></i>Table Comparison Progress</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th width="5%">#</th>
+                                <th width="30%">Table</th>
+                                <th width="15%">Status</th>
+                                <th width="15%">Duration</th>
+                                <th width="35%">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+        
+        data.table_list.forEach((table, index) => {
+            const statusIcon = getStatusIcon(table.status);
+            const statusClass = getStatusClass(table.status);
+            const duration = calculateDuration(table, data.start_time);
+            const isCurrentTable = data.current_table_index === index;
+            const rowClass = isCurrentTable ? 'table-info' : '';
+            
+            // Format status text
+            let statusText = table.status.charAt(0).toUpperCase() + table.status.slice(1);
+            if (table.status === 'identical') {
+                statusText = 'Identical';
+            } else if (table.status === 'different') {
+                statusText = 'Different';
+            }
+            
+            // Format details based on status
+            let detailsHTML = '';
+            if (table.status === 'error') {
+                detailsHTML = `<small class="text-danger">${table.status_detail || 'Unknown error'}</small>`;
+            } else if (table.status === 'identical') {
+                const summary = table.comparison_summary;
+                if (summary) {
+                    detailsHTML = `<small class="text-success">✓ ${summary.dev_row_count.toLocaleString()} rows, schema match</small>`;
+                } else {
+                    detailsHTML = `<small class="text-success">${table.status_detail || 'All criteria match'}</small>`;
+                }
+            } else if (table.status === 'different') {
+                const summary = table.comparison_summary;
+                if (summary) {
+                    let details = [];
+                    if (summary.dev_row_count !== summary.prod_row_count) {
+                        details.push(`Rows: ${summary.dev_row_count.toLocaleString()} vs ${summary.prod_row_count.toLocaleString()}`);
+                    }
+                    if (summary.schema_differences_count > 0) {
+                        details.push(`${summary.schema_differences_count} schema diff`);
+                    }
+                    if (summary.differing_rows_count > 0) {
+                        details.push(`${summary.differing_rows_count} data diff`);
+                    }
+                    if (summary.missing_from_dev_count > 0) {
+                        details.push(`${summary.missing_from_dev_count} missing DEV`);
+                    }
+                    if (summary.missing_from_prod_count > 0) {
+                        details.push(`${summary.missing_from_prod_count} missing PROD`);
+                    }
+                    detailsHTML = `<small class="text-warning">${details.join(', ')}</small>`;
+                } else {
+                    detailsHTML = `<small class="text-warning">${table.status_detail || 'Tables have differences'}</small>`;
+                }
+            } else if (table.status === 'running') {
+                detailsHTML = `<small class="text-primary">Comparing ${table.display_name || table.prod_table}</small>`;
+            } else {
+                detailsHTML = `<small class="text-muted">${table.display_name || table.prod_table}</small>`;
+            }
+            
+            tableStatusHTML += `
+                <tr class="${rowClass}">
+                    <td>${index + 1}</td>
+                    <td>
+                        <strong>${table.display_name}</strong>
+                        ${isCurrentTable ? '<i class="fas fa-arrow-left text-primary ms-2" title="Currently processing"></i>' : ''}
+                    </td>
+                    <td>
+                        <span class="badge ${statusClass}">
+                            ${statusIcon} ${statusText}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="duration-display" data-table-index="${index}">
+                            ${duration}
+                        </span>
+                    </td>
+                    <td>
+                        ${detailsHTML}
+                    </td>
+                </tr>
+            `;
+        });
+        
+        const completedTables = data.table_list.filter(t => t.status === 'identical' || t.status === 'different' || t.status === 'error').length;
+        const identicalTables = data.table_list.filter(t => t.status === 'identical').length;
+        const differentTables = data.table_list.filter(t => t.status === 'different').length;
+        const errorTables = data.table_list.filter(t => t.status === 'error').length;
+        
+        tableStatusHTML += `
+                        </tbody>
+                    </table>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-3">
+                        <strong>Total Elapsed:</strong> 
+                        <span id="totalElapsedTime">${calculateTotalElapsed(data.start_time)}</span>
+                    </div>
+                    <div class="col-md-3">
+                        <strong>Progress:</strong> 
+                        ${completedTables} / ${data.table_list.length} tables
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Results:</strong> 
+                        <span class="badge bg-success me-1">${identicalTables} Identical</span>
+                        <span class="badge bg-warning text-dark me-1">${differentTables} Different</span>
+                        <span class="badge bg-danger">${errorTables} Errors</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Update or create the table status display
+    let tableStatusContainer = document.getElementById('tableStatusContainer');
+    if (!tableStatusContainer) {
+        tableStatusContainer = document.createElement('div');
+        tableStatusContainer.id = 'tableStatusContainer';
+        document.querySelector('#statusCard .card-body').appendChild(tableStatusContainer);
+    }
+    
+    tableStatusContainer.innerHTML = tableStatusHTML;
+}
+
+function getStatusIcon(status) {
+    switch(status) {
+        case 'pending': return '<i class="fas fa-clock"></i>';
+        case 'running': return '<i class="fas fa-spinner fa-spin"></i>';
+        case 'identical': return '<i class="fas fa-check-circle"></i>';
+        case 'different': return '<i class="fas fa-exclamation-triangle"></i>';
+        case 'error': return '<i class="fas fa-times-circle"></i>';
+        default: return '<i class="fas fa-question"></i>';
+    }
+}
+
+function getStatusClass(status) {
+    switch(status) {
+        case 'pending': return 'bg-secondary';
+        case 'running': return 'bg-primary';
+        case 'identical': return 'bg-success';
+        case 'different': return 'bg-warning text-dark';
+        case 'error': return 'bg-danger';
+        default: return 'bg-secondary';
+    }
+}
+
+function calculateDuration(table, comparisonStartTime) {
+    if (table.status === 'pending') {
+        return '-';
+    }
+    
+    if (table.status === 'running') {
+        const startTime = new Date(table.start_time);
+        const now = new Date();
+        const duration = (now - startTime) / 1000;
+        return formatDuration(duration);
+    }
+    
+    if (table.duration) {
+        return formatDuration(table.duration);
+    }
+    
+    return '-';
+}
+
+function calculateTotalElapsed(startTime) {
+    if (!startTime) return '-';
+    
+    const start = new Date(startTime);
+    const now = new Date();
+    const elapsed = (now - start) / 1000;
+    return formatDuration(elapsed);
+}
+
+function formatDuration(seconds) {
+    if (seconds < 60) {
+        return `${seconds.toFixed(1)}s`;
+    } else if (seconds < 3600) {
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = Math.floor(seconds % 60);
+        return `${minutes}m ${remainingSeconds}s`;
+    } else {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        return `${hours}h ${minutes}m`;
+    }
+}
+
+// Update durations in real-time
+function updateRealTimeDurations() {
+    document.querySelectorAll('.duration-display').forEach(element => {
+        const tableIndex = parseInt(element.getAttribute('data-table-index'));
+        const statusData = window.currentStatusData;
+        
+        if (statusData && statusData.table_list && statusData.table_list[tableIndex]) {
+            const table = statusData.table_list[tableIndex];
+            const duration = calculateDuration(table, statusData.start_time);
+            element.textContent = duration;
+        }
+    });
+    
+    // Update total elapsed time
+    const totalElapsedElement = document.getElementById('totalElapsedTime');
+    if (totalElapsedElement && window.currentStatusData) {
+        totalElapsedElement.textContent = calculateTotalElapsed(window.currentStatusData.start_time);
+    }
+}
+
+function loadResults() {
+    fetch(`/api/results/${comparisonId}`)
+        .then(response => response.json())
+        .then(data => {
+            displayResults(data);
+        })
+        .catch(error => {
+            console.error('Error loading results:', error);
+            showError('Failed to load comparison results');
+        });
+}
+
+function displayResults(data) {
+    // Store results data globally for modal access
+    currentResultsData = data;
+    
+    // Hide status card and show results
+    document.getElementById('statusCard').style.display = 'none';
+    document.getElementById('resultsCard').style.display = 'block';
+    
+    const resultsHeader = document.getElementById('resultsHeader');
+    const resultsBody = document.getElementById('resultsBody');
+    
+    // Set header color based on overall results
+    const overallSuccess = data.identical_tables === data.successful_comparisons && data.failed_comparisons === 0;
+    const wasCancelled = data.was_cancelled || false;
+    
+    if (wasCancelled) {
+        resultsHeader.className = 'card-header bg-warning text-dark';
+    } else if (overallSuccess) {
+        resultsHeader.className = 'card-header bg-success text-white';
+    } else {
+        resultsHeader.className = 'card-header bg-warning text-dark';
+    }
+    
+    // Generate results HTML
+    let html = '';
+    
+    // Add cancellation notice if applicable
+    if (wasCancelled) {
+        html += `
+            <div class="alert alert-warning" role="alert">
+                <h5 class="alert-heading">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Comparison Cancelled
+                </h5>
+                <p class="mb-0">
+                    This comparison was cancelled by the user. Results are shown for the tables that were processed before cancellation.
+                </p>
+            </div>
+        `;
+    }
+    
+    if (data.is_batch || data.results.length > 1) {
+        // Batch comparison results
+        html += generateBatchSummary(data, wasCancelled);
+        html += generateBatchDetailedResults(data);
+    } else {
+        // Single table comparison results - use same accordion format as batch
+        html += generateBatchSummary(data, wasCancelled);
+        html += generateBatchDetailedResults(data);
+    }
+    
+    // Add action buttons
+    html += `
+        <div class="text-center mt-4">
+            <a href="${window.location.origin}" class="btn btn-primary">
+                <i class="fas fa-plus me-2"></i>New Comparison
+            </a>
+            <button class="btn btn-secondary ms-2" onclick="clearSession()">
+                <i class="fas fa-trash me-2"></i>Clear Saved Values
+            </button>
+        </div>
+    `;
+    
+    resultsBody.innerHTML = html;
+}
+
+function generateBatchSummary(data, wasCancelled = false) {
+    return `
+        <!-- Summary Cards -->
+        <div class="row mb-4">
+            <div class="col-md-2 col-6 mb-3">
+                <div class="card text-center border-primary" style="height: 80px;">
+                    <div class="card-body d-flex flex-column justify-content-center py-2 px-1">
+                        <h6 class="card-title text-primary mb-1" style="font-size: 0.85rem;">Total Tables</h6>
+                        <h4 class="text-primary mb-0" style="font-size: 1.3rem;">${data.total_pairs}</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2 col-6 mb-3">
+                <div class="card text-center border-success" style="height: 80px;">
+                    <div class="card-body d-flex flex-column justify-content-center py-2 px-1">
+                        <h6 class="card-title text-success mb-1" style="font-size: 0.85rem;">Identical</h6>
+                        <h4 class="text-success mb-0" style="font-size: 1.3rem;">${data.identical_tables}</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2 col-6 mb-3">
+                <div class="card text-center border-warning" style="height: 80px;">
+                    <div class="card-body d-flex flex-column justify-content-center py-2 px-1">
+                        <h6 class="card-title text-warning mb-1" style="font-size: 0.85rem;">Different</h6>
+                        <h4 class="text-warning mb-0" style="font-size: 1.3rem;">${data.different_tables}</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-2 col-6 mb-3">
+                <div class="card text-center border-danger" style="height: 80px;">
+                    <div class="card-body d-flex flex-column justify-content-center py-2 px-1">
+                        <h6 class="card-title text-danger mb-1" style="font-size: 0.85rem;">Failed</h6>
+                        <h4 class="text-danger mb-0" style="font-size: 1.3rem;">${data.failed_comparisons}</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 col-12 mb-3">
+                <div class="card text-center border-info" style="height: 80px;">
+                    <div class="card-body d-flex flex-column justify-content-center py-2 px-1">
+                        <h6 class="card-title text-info mb-1" style="font-size: 0.85rem;">Total Duration</h6>
+                        <h4 class="text-info mb-0" style="font-size: 1.3rem;">${data.total_duration.toFixed(2)}s</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+// Resto das funções permanecem iguais...
+function generateBatchDetailedResults(data) {
+    let html = `
+        <div class="accordion" id="resultsAccordion">
+    `;
+    
+    data.results.forEach((result, index) => {
+        const statusClass = result.error_message ? 'danger' : (result.tables_identical ? 'success' : 'warning');
+        const statusIcon = result.error_message ? 'fa-times-circle' : (result.tables_identical ? 'fa-check-circle' : 'fa-exclamation-triangle');
+        const statusText = result.error_message ? 'ERROR' : (result.tables_identical ? 'IDENTICAL' : 'DIFFERENT');
+        
+        html += `
+            <div class="accordion-item">
+                <h2 class="accordion-header d-flex align-items-center justify-content-between" id="heading${index}" style="width: 100%;">
+                    <div class="d-flex align-items-center flex-grow-1 w-100" style="min-width:0;">
+                        <div class="flex-grow-1" 
+                             data-bs-toggle="collapse" data-bs-target="#collapse${index}" 
+                             aria-expanded="${index === 0 ? 'true' : 'false'}" aria-controls="collapse${index}"
+                             style="display: flex; flex-direction: row; align-items: center; min-width:0; background: none; border: none; box-shadow: none; padding: 0; cursor: pointer;">
+                            <i class="fas ${statusIcon} text-${statusClass} me-2" style="flex-shrink: 0; font-size: 0.9rem;"></i>
+                            <strong class="flex-grow-1" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.95rem;">${result.display_name} (${result.comparison_duration.toFixed(1)}s)</strong>
+                        </div>
+                        <span class="btn btn-sm btn-outline-info ms-2" 
+                              onclick="showQueriesModal(${index}); event.stopPropagation();" 
+                              title="View executed queries"
+                              style="white-space: nowrap; flex-shrink: 0; cursor:pointer;">
+                            <i class="fas fa-info-circle"></i> Queries
+                        </span>
+                        <span class="badge bg-${statusClass} ms-2" style="white-space: nowrap; flex-shrink: 0; font-size: 0.75rem; padding: 0.25em 0.6em;">${statusText}</span>
+                        <button class="btn btn-sm btn-link ms-2 p-0" type="button" data-bs-toggle="collapse" data-bs-target="#collapse${index}" aria-expanded="${index === 0 ? 'true' : 'false'}" aria-controls="collapse${index}" style="box-shadow: none;">
+                            <span class="accordion-arrow" style="font-size: 1.25em; vertical-align: middle;">
+                                <i class="fas fa-chevron-down"></i>
+                            </span>
+                        </button>
+                    </div>
+                </h2>
+                <div id="collapse${index}" class="accordion-collapse collapse ${index === 0 ? 'show' : ''}" 
+                     aria-labelledby="heading${index}" data-bs-parent="#resultsAccordion">
+                    <div class="accordion-body">
+                        ${generateSingleTableResults(result, data, false, index)}
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += `</div>`;
+    return html;
+}
+
+function generateSingleTableResults(result, data, standalone = true, index = 0) {
+    if (result.error_message) {
+        return `
+            <div class="alert alert-danger" role="alert">
+                <h5 class="alert-heading">
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    Comparison Failed
+                </h5>
+                <p><strong>Error:</strong> ${result.error_message}</p>
+            </div>
+        `;
+    }
+    
+    let html = '';
+    
+    if (standalone) {
+        // Configuration Summary for single table mode
+        html += `
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <h5><i class="fas fa-cog me-2"></i>Configuration</h5>
+                    <table class="table table-sm">
+                        <tr><td><strong>DEV Table:</strong></td><td>${data.config.dev_database}.${result.dev_table}</td></tr>
+                        <tr><td><strong>PROD Table:</strong></td><td>${data.config.prod_database}.${result.prod_table}</td></tr>
+                        <tr><td><strong>Float Tolerance:</strong></td><td>${data.config.float_tolerance}</td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h5><i class="fas fa-chart-bar me-2"></i>Comparison Stats</h5>
+                    <table class="table table-sm">
+                        <tr><td><strong>Compared Columns:</strong></td><td>${result.compared_columns.length}</td></tr>
+                        <tr><td><strong>Ignored Columns:</strong></td><td>${result.ignored_columns.length}</td></tr>
+                        <tr><td><strong>Duration:</strong></td><td>${result.comparison_duration.toFixed(2)}s</td></tr>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Comparison Status Table
+    const schemaStatus = (result.schema_differences && result.schema_differences.length > 0) ? 'failed' : 'success';
+    const schemaIcon = schemaStatus === 'success' ? 'fa-check-circle text-success' : 'fa-times-circle text-danger';
+    const schemaDescription = schemaStatus === 'success' ? 'The schema is identical' : `Schema differences found (${result.schema_differences.length})`;
+    
+    const rowCountStatus = (result.dev_row_count === result.prod_row_count) ? 'success' : 'failed';
+    const rowCountIcon = rowCountStatus === 'success' ? 'fa-check-circle text-success' : 'fa-times-circle text-danger';
+    const rowCountDescription = rowCountStatus === 'success' ? 'Row counts are identical' : `DEV(${result.dev_row_count.toLocaleString()}) vs PROD(${result.prod_row_count.toLocaleString()})`;
+    
+    const dataStatus = (result.summary.total_differing === 0) ? 'success' : 'failed';
+    const dataIcon = dataStatus === 'success' ? 'fa-check-circle text-success' : 'fa-times-circle text-danger';
+    const dataDescription = dataStatus === 'success' ? 'No differing rows found' : `${result.summary.total_differing.toLocaleString()} differing rows found`;
+    
+    const missingRowsStatus = (result.summary.total_missing_dev === 0 && result.summary.total_missing_prod === 0) ? 'success' : 'failed';
+    const missingRowsIcon = missingRowsStatus === 'success' ? 'fa-check-circle text-success' : 'fa-times-circle text-danger';
+    const missingRowsDescription = missingRowsStatus === 'success' ? 'No missing rows found' : `DEV missing: ${result.summary.total_missing_prod.toLocaleString()}, PROD missing: ${result.summary.total_missing_dev.toLocaleString()}`;
+    
+    html += `
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card h-100 comparison-results-card">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-clipboard-list me-2"></i>Comparison Results</h6>
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th width="30%">Component</th>
+                                    <th width="15%" class="text-center">Status</th>
+                                    <th width="55%">Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><strong>Schema</strong></td>
+                                    <td class="text-center"><i class="fas ${schemaIcon}"></i></td>
+                                    <td>${schemaDescription}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Row Count</strong></td>
+                                    <td class="text-center"><i class="fas ${rowCountIcon}"></i></td>
+                                    <td>${rowCountDescription}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Missing Rows</strong></td>
+                                    <td class="text-center"><i class="fas ${missingRowsIcon}"></i></td>
+                                    <td>${missingRowsDescription}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Different Rows</strong></td>
+                                    <td class="text-center"><i class="fas ${dataIcon}"></i></td>
+                                    <td>${dataDescription}</td>
+                                </tr>
+                                ${(result.dev_compared_rows < result.dev_row_count || result.prod_compared_rows < result.prod_row_count) ? `
+                                <tr class="table-warning">
+                                    <td colspan="3" class="text-center">
+                                        <i class="fas fa-info-circle me-2"></i>
+                                        <em>Limited Comparison: Only last ${Math.min(result.dev_compared_rows, result.prod_compared_rows).toLocaleString()} rows compared</em>
+                                    </td>
+                                </tr>
+                                ` : ''}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100 comparison-statistics-card">
+                    <div class="card-header">
+                        <h6 class="mb-0"><i class="fas fa-chart-bar me-2"></i>Comparison Statistics</h6>
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th width="35%">Description</th>
+                                    <th width="20%" class="text-center">DEV</th>
+                                    <th width="20%" class="text-center">PROD</th>
+                                    <th width="20%" class="text-center">Difference</th>
+                                    <th width="5%"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><strong>Total Rows</strong></td>
+                                    <td class="text-center">${result.dev_row_count.toLocaleString()}</td>
+                                    <td class="text-center">${result.prod_row_count.toLocaleString()}</td>
+                                    <td class="text-center">${(result.prod_row_count - result.dev_row_count).toLocaleString()}</td>
+                                    <td class="text-center">${result.dev_row_count !== result.prod_row_count ? '<i class="fas fa-exclamation-triangle text-warning"></i>' : ''}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Compared Rows</strong></td>
+                                    <td class="text-center">${result.dev_compared_rows.toLocaleString()}</td>
+                                    <td class="text-center">${result.prod_compared_rows.toLocaleString()}</td>
+                                    <td class="text-center">${(result.prod_compared_rows - result.dev_compared_rows).toLocaleString()}</td>
+                                    <td class="text-center">${result.dev_compared_rows !== result.prod_compared_rows ? '<i class="fas fa-exclamation-triangle text-warning"></i>' : ''}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Missing Rows</strong></td>
+                                    <td class="text-center">${result.summary.total_missing_prod.toLocaleString()}</td>
+                                    <td class="text-center">${result.summary.total_missing_dev.toLocaleString()}</td>
+                                    <td class="text-center">${(result.summary.total_missing_dev - result.summary.total_missing_prod).toLocaleString()}</td>
+                                    <td class="text-center">${(result.summary.total_missing_prod > 0 || result.summary.total_missing_dev > 0) ? '<i class="fas fa-exclamation-triangle text-warning"></i>' : ''}</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Columns Compared</strong></td>
+                                    <td class="text-center">${result.compared_columns.length}</td>
+                                    <td class="text-center">${result.compared_columns.length}</td>
+                                    <td class="text-center">0</td>
+                                    <td class="text-center"></td>
+                                </tr>
+                                <tr>
+                                    <td><strong>Differing Rows</strong></td>
+                                    <td class="text-center"><strong>${result.summary.total_differing.toLocaleString()}</strong></td>
+                                    <td class="text-center"><strong>${result.summary.total_differing.toLocaleString()}</strong></td>
+                                    <td class="text-center"><strong>0</strong></td>
+                                    <td class="text-center">${result.summary.total_differing > 0 ? '<i class="fas fa-times-circle text-danger"></i>' : ''}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Add schema differences if any
+    if (result.schema_differences && result.schema_differences.length > 0) {
+        html += `
+            <div class="card mb-3">
+                <div class="card-header bg-warning text-dark">
+                    <h6 class="mb-0"><i class="fas fa-exclamation-triangle me-2"></i>Schema Differences</h6>
+                </div>
+                <div class="card-body">
+                    <ul class="list-unstyled mb-0">
+                        ${result.schema_differences.map(diff => `<li><i class="fas fa-arrow-right me-2"></i>${diff}</li>`).join('')}
+                    </ul>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Add missing rows sections
+    if (result.missing_from_dev.length > 0) {
+        // For missing from DEV, show PROD primary key columns (since missing values come from PROD)
+        console.log('Debug: prod_primary_key_columns:', result.prod_primary_key_columns);
+        const primaryKeyColumns = result.prod_primary_key_columns || [];
+        const primaryKeyInfo = primaryKeyColumns.length > 0 ? 
+            `Primary Key Columns (PROD): ${primaryKeyColumns.join(', ')}` : 
+            'Key columns information not available';
+        
+        html += `
+            <div class="card mb-3">
+                <div class="card-header bg-danger text-white" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#missingFromDev${index}" aria-expanded="false" aria-controls="missingFromDev${index}">
+                    <h6 class="mb-0">
+                        <i class="fas fa-minus-circle me-2"></i>
+                        Rows Missing from DEV (${result.summary.total_missing_dev})
+                        <small class="text-muted ms-2">${primaryKeyInfo}</small>
+                        <i class="fas fa-chevron-down float-end collapse-icon" style="transition: transform 0.3s ease;"></i>
+                    </h6>
+                </div>
+                <div class="collapse" id="missingFromDev${index}">
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped missing-rows-table">
+                                <thead>
+                                    <tr>
+                                        <th width="8%">#</th>
+                                        <th width="92%">Missing Key Values (from PROD)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${result.missing_from_dev.slice(0, Math.min(result.missing_from_dev.length, 100)).map((pk, idx) => 
+                                        `<tr><td>${idx + 1}</td><td><code>${pk}</code></td></tr>`
+                                    ).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        ${result.summary.total_missing_dev > result.missing_from_dev.length ? 
+                            `<p class="text-muted mt-2"><i class="fas fa-info-circle me-1"></i>Showing first ${result.missing_from_dev.length} of ${result.summary.total_missing_dev} missing rows</p>` : ''}
+                        ${result.missing_from_dev.length > 100 ? 
+                            `<p class="text-muted mt-2"><i class="fas fa-info-circle me-1"></i>Limited to first 100 rows for performance</p>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    if (result.missing_from_prod.length > 0) {
+        // For missing from PROD, show DEV primary key columns (since missing values come from DEV)
+        console.log('Debug: dev_primary_key_columns:', result.dev_primary_key_columns);
+        const primaryKeyColumns = result.dev_primary_key_columns || [];
+        const primaryKeyInfo = primaryKeyColumns.length > 0 ? 
+            `Primary Key Columns (DEV): ${primaryKeyColumns.join(', ')}` : 
+            'Key columns information not available';
+        
+        html += `
+            <div class="card mb-3">
+                <div class="card-header bg-warning text-dark" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#missingFromProd${index}" aria-expanded="false" aria-controls="missingFromProd${index}">
+                    <h6 class="mb-0">
+                        <i class="fas fa-minus-circle me-2"></i>
+                        Rows Missing from PROD (${result.summary.total_missing_prod})
+                        <small class="text-muted ms-2">${primaryKeyInfo}</small>
+                        <i class="fas fa-chevron-down float-end collapse-icon" style="transition: transform 0.3s ease;"></i>
+                    </h6>
+                </div>
+                <div class="collapse" id="missingFromProd${index}">
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped missing-rows-table">
+                                <thead>
+                                    <tr>
+                                        <th width="8%">#</th>
+                                        <th width="92%">Missing Key Values (from DEV)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${result.missing_from_prod.slice(0, Math.min(result.missing_from_prod.length, 100)).map((pk, idx) => 
+                                        `<tr><td>${idx + 1}</td><td><code>${pk}</code></td></tr>`
+                                    ).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        ${result.summary.total_missing_prod > result.missing_from_prod.length ? 
+                            `<p class="text-muted mt-2"><i class="fas fa-info-circle me-1"></i>Showing first ${result.missing_from_prod.length} of ${result.summary.total_missing_prod} missing rows</p>` : ''}
+                        ${result.missing_from_prod.length > 100 ? 
+                            `<p class="text-muted mt-2"><i class="fas fa-info-circle me-1"></i>Limited to first 100 rows for performance</p>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Add differing rows
+    if (result.differing_rows.length > 0) {
+        html += `
+            <div class="card mb-3">
+                <div class="card-header bg-info text-white" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#differingData${index}" aria-expanded="false" aria-controls="differingData${index}">
+                    <h6 class="mb-0">
+                        <i class="fas fa-exchange-alt me-2"></i>
+                        Rows with Differing Data (${result.summary.total_differing})
+                        <i class="fas fa-chevron-down float-end collapse-icon" style="transition: transform 0.3s ease;"></i>
+                    </h6>
+                </div>
+                <div class="collapse" id="differingData${index}">
+                    <div class="card-body">
+        `;
+        
+        result.differing_rows.forEach((row, index) => {
+            // Check if this is a cross-environment comparison (different PKs)
+            const isCrossComparison = row.primary_key.includes('↔');
+            
+            html += `
+                <div class="mb-4">
+                    <h6>
+                        <strong>${isCrossComparison ? 'Equivalent Rows' : 'Primary Key'}:</strong> 
+                        <code>${row.primary_key}</code>
+                    </h6>
+                    ${isCrossComparison ? '<p class="text-muted small">These rows have equivalent content but different primary keys</p>' : ''}
+                    <div class="table-responsive">
+                        <table class="table table-sm table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Column</th>
+                                    <th class="text-success">DEV Value</th>
+                                    <th class="text-danger">PROD Value</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${row.differences.map(diff => `
+                                    <tr>
+                                        <td><strong>${diff.column}</strong></td>
+                                        <td class="text-success"><code>${diff.dev_value}</code></td>
+                                        <td class="text-danger"><code>${diff.prod_value}</code></td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        });
+        
+        if (result.summary.total_differing > result.differing_rows.length) {
+            html += `<p class="text-muted">... and ${result.summary.total_differing - result.differing_rows.length} more rows with differences</p>`;
+        }
+        
+        html += `
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Add limitation notice if applicable
+    // Add limitation notice if applicable
+    if (result.was_limited) {
+        html += `
+            <div class="alert alert-warning" role="alert">
+                <h6 class="alert-heading">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Limited Comparison Notice
+                </h6>
+                <p class="mb-2">
+                    <strong>Important:</strong> This comparison was limited to the ${getSamplingMethodText(result.sampling_method)} 
+                    ${result.max_rows_setting.toLocaleString()} rows due to table size optimization.
+                </p>
+                <ul class="mb-2">
+                    <li><strong>Total rows:</strong> DEV: ${result.dev_row_count.toLocaleString()}, PROD: ${result.prod_row_count.toLocaleString()}</li>
+                    <li><strong>Compared rows:</strong> DEV: ${result.dev_compared_rows.toLocaleString()}, PROD: ${result.prod_compared_rows.toLocaleString()}</li>
+                </ul>
+                <p class="mb-0">
+                    <strong>Note:</strong> Even if the compared data matches, tables are not considered "identical" 
+                    unless row counts match and comparison covers the full table.
+                </p>
+            </div>
+        `;
+    }
+    
+    return html;
+}
+
+function getSamplingMethodText(method) {
+    switch(method) {
+        case 'LAST_N':
+            return 'last';
+        case 'RANDOM':
+            return 'random';
+        case 'TOP_N':
+        default:
+            return 'first';
+    }
+}
+
+function getDetailedStatusMessage(result) {
+    if (result.tables_identical) {
+        return `
+            <p class="mb-0">
+                <strong>✅ All criteria match:</strong>
+                <br>• Schema is identical
+                <br>• Row counts match (${result.dev_row_count.toLocaleString()} rows each)
+                <br>• All compared data is identical
+                <br>• Full table comparison completed
+            </p>
+        `;
+    } else {
+        let issues = [];
+        
+        // Check schema differences
+        if (result.schema_differences && result.schema_differences.length > 0) {
+            issues.push(`<span class="text-danger">❌ Schema differences found (${result.schema_differences.length})</span>`);
+        } else {
+            issues.push(`<span class="text-success">✅ Schema is identical</span>`);
+        }
+        
+        // Check row count differences
+        if (result.dev_row_count !== result.prod_row_count) {
+            issues.push(`<span class="text-danger">❌ Row counts differ: DEV(${result.dev_row_count.toLocaleString()}) vs PROD(${result.prod_row_count.toLocaleString()})</span>`);
+        } else {
+            issues.push(`<span class="text-success">✅ Row counts match (${result.dev_row_count.toLocaleString()} each)</span>`);
+        }
+        
+        // Check data differences in compared rows
+        if (result.summary.total_differing > 0 || result.summary.total_missing_dev > 0 || result.summary.total_missing_prod > 0) {
+            let dataIssues = [];
+            if (result.summary.total_differing > 0) {
+                dataIssues.push(`${result.summary.total_differing} differing rows`);
+            }
+            if (result.summary.total_missing_dev > 0) {
+                dataIssues.push(`${result.summary.total_missing_dev} missing from DEV`);
+            }
+            if (result.summary.total_missing_prod > 0) {
+                dataIssues.push(`${result.summary.total_missing_prod} missing from PROD`);
+            }
+            issues.push(`<span class="text-danger">❌ Data differences: ${dataIssues.join(', ')}</span>`);
+        } else {
+            issues.push(`<span class="text-success">✅ Compared data is identical</span>`);
+        }
+        
+        // Check if comparison was limited
+        if (result.was_limited) {
+            issues.push(`<span class="text-warning">⚠️ Limited comparison: Only ${getSamplingMethodText(result.sampling_method)} ${result.max_rows_setting.toLocaleString()} rows compared</span>`);
+        } else {
+            issues.push(`<span class="text-success">✅ Full table comparison completed</span>`);
+        }
+        
+        return `
+            <div class="mb-2">
+                <strong>Comparison Results:</strong>
+            </div>
+            <ul class="list-unstyled mb-0">
+                ${issues.map(issue => `<li class="mb-1">${issue}</li>`).join('')}
+            </ul>
+        `;
+    }
+}
+
+function showError(message) {
+    const statusCard = document.getElementById('statusCard');
+    const statusText = document.getElementById('statusText');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const progressBar = document.getElementById('progressBar');
+    
+    statusCard.className = 'card mb-4 border-danger';
+    statusCard.querySelector('.card-header').className = 'card-header bg-danger text-white';
+    statusText.textContent = message;
+    statusText.className = 'mt-3 text-danger';
+    loadingSpinner.style.display = 'none';
+    progressBar.className = 'progress-bar bg-danger';
+    progressBar.style.width = '100%';
+}
+
+// Function to clear saved session data
+function clearSession() {
+    if (confirm('Are you sure you want to clear all saved form values?')) {
+        fetch('/api/clear-session', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('Saved values cleared successfully!');
+                window.location.href = '/';
+            }
+        })
+        .catch(error => {
+            console.error('Error clearing session:', error);
+        });
+    }
+}
+
+// Start checking status
+statusInterval = setInterval(checkStatus, 2000);
+durationInterval = setInterval(updateRealTimeDurations, 1000); // Update durations every second
+checkStatus(); // Initial check
+
+// Add event listeners for collapse animations after results are loaded
+document.addEventListener('DOMContentLoaded', function() {
+    // Function to handle chevron rotation
+    function handleCollapseToggle(event) {
+        const icon = event.target.closest('[data-bs-toggle="collapse"]').querySelector('.collapse-icon');
+        if (icon) {
+            // Toggle the rotation
+            if (icon.style.transform === 'rotate(180deg)') {
+                icon.style.transform = 'rotate(0deg)';
+            } else {
+                icon.style.transform = 'rotate(180deg)';
+            }
+        }
+    }
+    
+    // Add event listeners when results are displayed
+    const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            if (mutation.type === 'childList') {
+                // Look for newly added collapse elements
+                const collapseElements = document.querySelectorAll('[data-bs-toggle="collapse"]');
+                collapseElements.forEach(function(element) {
+                    if (!element.hasAttribute('data-listener-added')) {
+                        element.addEventListener('click', handleCollapseToggle);
+                        element.setAttribute('data-listener-added', 'true');
+                    }
+                });
+            }
+        });
+    });
+    
+    // Start observing
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+});
+
+// Global variable to store current results data
+let currentResultsData = null;
+
+function showQueriesModal(resultIndex) {
+    if (!currentResultsData || !currentResultsData.results || !currentResultsData.results[resultIndex]) {
+        alert('Query data not available');
+        return;
+    }
+    
+    const result = currentResultsData.results[resultIndex];
+    const executedQueries = result.executed_queries || { DEV: [], PROD: [] };
+    
+    // Set modal title
+    document.getElementById('queriesModalLabel').innerHTML = `
+        <i class="fas fa-database me-2"></i>
+        Executed Queries - ${result.display_name}
+    `;
+    
+    // Generate modal content
+    let modalContent = '';
+    
+    // DEV Queries Section
+    if (executedQueries.DEV && executedQueries.DEV.length > 0) {
+        modalContent += `
+            <div class="mb-4">
+                <h6 class="text-success">
+                    <i class="fas fa-server me-2"></i>
+                    DEV Environment Queries (${executedQueries.DEV.length})
+                </h6>
+                <div class="accordion" id="devQueriesAccordion">
+        `;
+        
+        executedQueries.DEV.forEach((queryInfo, index) => {
+            const queryId = `devQuery${index}`;
+            modalContent += `
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="heading${queryId}">
+                        <button class="accordion-button collapsed" type="button" 
+                                data-bs-toggle="collapse" data-bs-target="#collapse${queryId}" 
+                                aria-expanded="false" aria-controls="collapse${queryId}">
+                            <strong>${queryInfo.description || 'Query ' + (index + 1)}</strong>
+                        </button>
+                    </h2>
+                    <div id="collapse${queryId}" class="accordion-collapse collapse" 
+                         aria-labelledby="heading${queryId}" data-bs-parent="#devQueriesAccordion">
+                        <div class="accordion-body">
+                            <div class="position-relative">
+                                <button class="btn btn-sm btn-outline-secondary position-absolute top-0 end-0 m-2" 
+                                        onclick="copyToClipboard('${queryId}Code')" title="Copy to clipboard">
+                                    <i class="fas fa-copy"></i> Copy
+                                </button>
+                                <pre id="${queryId}Code" class="bg-light p-3 rounded" style="margin-top: 40px;"><code>${queryInfo.query}</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        modalContent += '</div></div>';
+    } else {
+        modalContent += `
+            <div class="mb-4">
+                <h6 class="text-success">
+                    <i class="fas fa-server me-2"></i>
+                    DEV Environment Queries
+                </h6>
+                <p class="text-muted">No queries recorded for DEV environment</p>
+            </div>
+        `;
+    }
+    
+    // PROD Queries Section
+    if (executedQueries.PROD && executedQueries.PROD.length > 0) {
+        modalContent += `
+            <div class="mb-4">
+                <h6 class="text-danger">
+                    <i class="fas fa-server me-2"></i>
+                    PROD Environment Queries (${executedQueries.PROD.length})
+                </h6>
+                <div class="accordion" id="prodQueriesAccordion">
+        `;
+        
+        executedQueries.PROD.forEach((queryInfo, index) => {
+            const queryId = `prodQuery${index}`;
+            modalContent += `
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="heading${queryId}">
+                        <button class="accordion-button collapsed" type="button" 
+                                data-bs-toggle="collapse" data-bs-target="#collapse${queryId}" 
+                                aria-expanded="false" aria-controls="collapse${queryId}">
+                            <strong>${queryInfo.description || 'Query ' + (index + 1)}</strong>
+                        </button>
+                    </h2>
+                    <div id="collapse${queryId}" class="accordion-collapse collapse" 
+                         aria-labelledby="heading${queryId}" data-bs-parent="#prodQueriesAccordion">
+                        <div class="accordion-body">
+                            <div class="position-relative">
+                                <button class="btn btn-sm btn-outline-secondary position-absolute top-0 end-0 m-2" 
+                                        onclick="copyToClipboard('${queryId}Code')" title="Copy to clipboard">
+                                    <i class="fas fa-copy"></i> Copy
+                                </button>
+                                <pre id="${queryId}Code" class="bg-light p-3 rounded" style="margin-top: 40px;"><code>${queryInfo.query}</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        modalContent += '</div></div>';
+    } else {
+        modalContent += `
+            <div class="mb-4">
+                <h6 class="text-danger">
+                    <i class="fas fa-server me-2"></i>
+                    PROD Environment Queries
+                </h6>
+                <p class="text-muted">No queries recorded for PROD environment</p>
+            </div>
+        `;
+    }
+    
+    // Add usage instructions
+    modalContent += `
+        <div class="alert alert-info">
+            <h6><i class="fas fa-lightbulb me-2"></i>How to use these queries:</h6>
+            <ol class="mb-0">
+                <li>Click on any query section above to expand it</li>
+                <li>Use the "Copy" button to copy the SQL to your clipboard</li>
+                <li>Paste and run the query directly in Databricks SQL Editor</li>
+                <li>These are the exact queries that were executed during the comparison</li>
+            </ol>
+        </div>
+    `;
+    
+    // Set modal content
+    document.getElementById('queriesModalBody').innerHTML = modalContent;
+    
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('queriesModal'));
+    modal.show();
+}
+
+function copyToClipboard(elementId) {
+    const element = document.getElementById(elementId);
+    const text = element.textContent;
+    
+    navigator.clipboard.writeText(text).then(() => {
+        // Show success feedback
+        const button = element.parentElement.querySelector('button');
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-check"></i> Copied!';
+        button.classList.remove('btn-outline-secondary');
+        button.classList.add('btn-success');
+        
+        setTimeout(() => {
+            button.innerHTML = originalText;
+            button.classList.remove('btn-success');
+            button.classList.add('btn-outline-secondary');
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy text: ', err);
+        alert('Failed to copy to clipboard');
+    });
+}
+</script>
+{% endblock %}

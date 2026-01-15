@@ -1,0 +1,7 @@
+# Direct dependencies (pinned)
+Flask==3.1.2
+Flask-WTF==1.2.2
+WTForms==3.2.1
+pandas==2.3.3
+databricks-sql-connector==4.2.3
+keyring==25.7.0

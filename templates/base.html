@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Database Table Comparator{% endblock %}</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🔍%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid px-3">
+            <a class="navbar-brand" href="{{ url_for('compare_page') }}">
+                <i class="fas fa-database"></i>
+                Table Comparator
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint=='compare_page' %}active{% endif %}" href="{{ url_for('compare_page') }}">
+                            <i class="fas fa-rocket"></i> Compare
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint=='results' %}active{% endif %}" href="#" onclick="goToCurrentResults(); return false;" id="resultsNavLink">
+                            <i class="fas fa-chart-line"></i> Results
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint=='tables_page' %}active{% endif %}" href="{{ url_for('tables_page') }}">
+                            <i class="fas fa-table"></i> Tables
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint=='settings_page' %}active{% endif %}" href="{{ url_for('settings_page') }}">
+                            <i class="fas fa-cog"></i> Settings
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <button class="btn btn-danger btn-sm ms-2" onclick="shutdownServer()" title="Stop the server">
+                            <i class="fas fa-power-off"></i> Stop App
+                        </button>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container-fluid px-3 py-4">
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else 'info' }} alert-dismissible fade show slide-up" role="alert">
+                        <i class="fas fa-{{ 'exclamation-triangle' if category == 'error' else 'info-circle' }} me-2"></i>
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Footer -->
+    <footer class="text-center text-muted py-4 mt-5">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-6 text-start">
+                    <small>
+                        <i class="fas fa-code me-1"></i>
+                        Built with ❤️ using Flask & Bootstrap
+                    </small>
+                </div>
+                <div class="col-md-6 text-end">
+                    <small>
+                        <i class="fas fa-copyright me-1"></i>
+                        2024 Database Table Comparator
+                    </small>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+    
+    {% block scripts %}{% endblock %}
+
+    <script>
+    // Enable Bootstrap tooltips globally
+    document.addEventListener('DOMContentLoaded', function () {
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl)
+        })
+    });
+
+    // Global function to navigate to current/latest results
+    function goToCurrentResults() {
+        fetch('/api/status/latest')
+            .then(response => response.json())
+            .then(data => {
+                if (data.comparison_id) {
+                    // Navigate to results page for the latest comparison
+                    window.location.href = `/results/${data.comparison_id}`;
+                } else {
+                    // No comparison found, show alert
+                    alert('No comparison results available. Please run a comparison first.');
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching latest results:', error);
+                alert('Error accessing results. Please try again.');
+            });
+    }
+
+    // Global variables for navbar status monitoring
+    let navbarUpdateInterval = null;
+
+    // Function to update Results nav link status
+    function updateResultsNavLink() {
+        const resultsLink = document.getElementById('resultsNavLink');
+        if (!resultsLink) return;
+
+        // Check if we're currently on the results page
+        const isOnResultsPage = window.location.pathname.includes('/results/');
+
+        fetch('/api/status/latest')
+            .then(response => response.json())
+            .then(data => {
+                if (data.comparison_id) {
+                    // There's a comparison available
+                    if (data.status === 'running' || data.status === 'pending') {
+                        resultsLink.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Results';
+                        resultsLink.classList.add('text-warning');
+                        resultsLink.classList.remove('text-muted', 'active');
+                        resultsLink.title = 'Comparison in progress - Click to view live results';
+                        // Remove inline styles when not active
+                        if (!isOnResultsPage) {
+                            resultsLink.style.color = '';
+                            resultsLink.style.opacity = '';
+                        }
+                    } else if (data.status === 'completed') {
+                        resultsLink.innerHTML = '<i class="fas fa-chart-line me-1"></i> Results';
+                        resultsLink.classList.remove('text-warning', 'text-muted');
+                        if (isOnResultsPage) {
+                            resultsLink.classList.add('active');
+                            // Force white color when active
+                            resultsLink.style.color = 'white';
+                            resultsLink.style.opacity = '1';
+                        } else {
+                            // Remove inline styles when not on results page
+                            resultsLink.style.color = '';
+                            resultsLink.style.opacity = '';
+                        }
+                        resultsLink.title = 'View latest comparison results';
+                    } else if (data.status === 'error') {
+                        resultsLink.innerHTML = '<i class="fas fa-exclamation-triangle me-1"></i> Results';
+                        resultsLink.classList.remove('text-warning', 'text-muted');
+                        if (isOnResultsPage) {
+                            resultsLink.classList.add('active');
+                            // Force white color when active
+                            resultsLink.style.color = 'white';
+                            resultsLink.style.opacity = '1';
+                        } else {
+                            // Remove inline styles when not on results page
+                            resultsLink.style.color = '';
+                            resultsLink.style.opacity = '';
+                        }
+                        resultsLink.title = 'Last comparison had errors - Click to view';
+                    } else {
+                        resultsLink.innerHTML = '<i class="fas fa-chart-line me-1"></i> Results';
+                        resultsLink.classList.remove('text-warning');
+                        resultsLink.classList.add('text-muted');
+                        if (isOnResultsPage) {
+                            resultsLink.classList.remove('text-muted');
+                            resultsLink.classList.add('active');
+                            // Force white color when active
+                            resultsLink.style.color = 'white';
+                            resultsLink.style.opacity = '1';
+                        } else {
+                            // Remove inline styles when not on results page
+                            resultsLink.style.color = '';
+                            resultsLink.style.opacity = '';
+                        }
+                        resultsLink.title = 'View comparison results';
+                    }
+                } else {
+                    // No comparison available
+                    resultsLink.classList.add('text-muted');
+                    resultsLink.classList.remove('text-warning', 'active');
+                    resultsLink.innerHTML = '<i class="fas fa-chart-line me-1"></i> Results';
+                    resultsLink.title = 'No comparison results available';
+                    
+                    // Even if no comparison, if we're on results page, show as active
+                    if (isOnResultsPage) {
+                        resultsLink.classList.remove('text-muted');
+                        resultsLink.classList.add('active');
+                        // Force white color when active
+                        resultsLink.style.color = 'white';
+                        resultsLink.style.opacity = '1';
+                    } else {
+                        // Remove inline styles when not on results page
+                        resultsLink.style.color = '';
+                        resultsLink.style.opacity = '';
+                    }
+                }
+            })
+            .catch(error => {
+                // Error fetching status, keep default appearance
+                console.log('No comparison status available');
+                resultsLink.classList.add('text-muted');
+                resultsLink.classList.remove('text-warning', 'active');
+                resultsLink.innerHTML = '<i class="fas fa-chart-line me-1"></i> Results';
+                resultsLink.title = 'Results';
+                
+                // If we're on results page, show as active even with error
+                if (isOnResultsPage) {
+                    resultsLink.classList.remove('text-muted');
+                    resultsLink.classList.add('active');
+                }
+            });
+    }
+
+    // Function to start continuous monitoring of navbar status
+    function startNavbarMonitoring() {
+        // Update immediately
+        updateResultsNavLink();
+        
+        // Set up periodic updates every 5 seconds
+        if (navbarUpdateInterval) {
+            clearInterval(navbarUpdateInterval);
+        }
+        
+        navbarUpdateInterval = setInterval(() => {
+            updateResultsNavLink();
+        }, 5000);
+    }
+
+    // Function to stop navbar monitoring
+    function stopNavbarMonitoring() {
+        if (navbarUpdateInterval) {
+            clearInterval(navbarUpdateInterval);
+            navbarUpdateInterval = null;
+        }
+    }
+
+    // Initialize navbar monitoring on page load
+    document.addEventListener('DOMContentLoaded', function() {
+        startNavbarMonitoring();
+        
+        // Expose function globally so other pages can trigger updates
+        window.updateResultsNavLink = updateResultsNavLink;
+        window.startNavbarMonitoring = startNavbarMonitoring;
+        window.stopNavbarMonitoring = stopNavbarMonitoring;
+        
+        // Force immediate update to handle page-specific active states
+        setTimeout(updateResultsNavLink, 100);
+        
+        // Additional check specifically for results page active state
+        setTimeout(function() {
+            const resultsLink = document.getElementById('resultsNavLink');
+            const isOnResultsPage = window.location.pathname.includes('/results/');
+            
+            if (isOnResultsPage && resultsLink) {
+                // Force active state on results page regardless of other conditions
+                resultsLink.classList.remove('text-warning', 'text-muted');
+                resultsLink.classList.add('active');
+                
+                // Force style directly as backup
+                resultsLink.style.color = 'rgba(255, 255, 255, 1)';
+                resultsLink.style.opacity = '1';
+                
+                console.log('Results page detected - Applied active styles');
+            }
+        }, 200);
+        
+        // Additional force update after a longer delay to override any dynamic updates
+        setTimeout(function() {
+            const resultsLink = document.getElementById('resultsNavLink');
+            const isOnResultsPage = window.location.pathname.includes('/results/');
+            
+            if (isOnResultsPage && resultsLink) {
+                resultsLink.classList.remove('text-warning', 'text-muted');
+                resultsLink.classList.add('active');
+                resultsLink.style.color = 'rgba(255, 255, 255, 1)';
+                resultsLink.style.opacity = '1';
+            }
+        }, 1000);
+    });
+
+    // Stop monitoring when page is about to unload (performance optimization)
+    window.addEventListener('beforeunload', function() {
+        stopNavbarMonitoring();
+    });
+
+    // Shutdown server function
+    function shutdownServer() {
+        if (confirm('Are you sure you want to stop the server? This will close the application.')) {
+            fetch('/shutdown', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert('Server is shutting down...');
+                // Try to close the window/tab after a short delay
+                setTimeout(function() {
+                    window.close();
+                }, 2000);
+            })
+            .catch(error => {
+                console.log('Server shutdown initiated');
+                // Server might stop before responding, so this is expected
+                setTimeout(function() {
+                    window.close();
+                }, 2000);
+            });
+        }
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,1177 @@
+{% extends "base.html" %}
+
+{% block title %}Database Table Comparator - Compare{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('compare') }}" id="comparisonForm">
+                    {{ form.hidden_tag() }}
+                    
+                    <!-- Hidden settings populated from your saved Settings -->
+                    <input type="hidden" name="float_tolerance" value="{{ form.float_tolerance.data }}">
+                    <input type="hidden" name="max_rows_limit" value="{{ form.max_rows_limit.data }}">
+                    <input type="hidden" name="dev_host" value="{{ form.dev_host.data }}">
+                    <input type="hidden" name="dev_port" value="{{ form.dev_port.data }}">
+                    <input type="hidden" name="dev_database" value="{{ form.dev_database.data }}">
+                    <input type="hidden" name="dev_token" value="{{ form.dev_token.data }}">
+                    <input type="hidden" name="prod_host" value="{{ form.prod_host.data }}">
+                    <input type="hidden" name="prod_port" value="{{ form.prod_port.data }}">
+                    <input type="hidden" name="prod_database" value="{{ form.prod_database.data }}">
+                    <input type="hidden" name="prod_token" value="{{ form.prod_token.data }}">
+
+                    <!-- Table Pairs Configuration -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <i class="fas fa-table me-2"></i>
+                                Table Pairs Configuration
+                            </h5>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="me-3 small">Configured: <strong><span id="tablePairCount">0</span></strong></span>
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="clearAllTablePairs()">
+                                    <i class="fas fa-eraser me-1"></i>Clear All
+                                </button>
+                                <button type="button" class="btn btn-info btn-sm" onclick="showAddFiltersModal()">
+                                    <i class="fas fa-filter me-1"></i>Add Filters
+                                </button>
+                                <button type="button" class="btn btn-warning btn-sm" onclick="showIgnoreAllModal()">
+                                    <i class="fas fa-eye-slash me-1"></i>Ignore All
+                                </button>
+                                <button type="button" class="btn btn-success btn-sm" onclick="showAddMultiplePairsModal()">
+                                    <i class="fas fa-plus me-1"></i>Add Multiple Pairs
+                                </button>
+                                <button type="button" class="btn btn-light btn-sm" onclick="addTablePair()">
+                                <i class="fas fa-plus me-1"></i>Add Table Pair
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="tablePairsContainer">
+                                <!-- Table pairs will be added here dynamically -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div class="text-center">
+                        <button type="submit" class="btn btn-primary btn-lg" id="compareBtn">
+                            <i class="fas fa-play me-2"></i>
+                            <span id="compareBtnText">Start Comparison</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Multiple Pairs Modal -->
+<div class="modal fade" id="addMultiplePairsModal" tabindex="-1" aria-labelledby="addMultiplePairsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addMultiplePairsModalLabel">
+                    <i class="fas fa-plus me-2"></i>Add Multiple Table Pairs
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">
+                    Enter table names one per line. The system will automatically create table pairs with matching information for each table.
+                </p>
+                <div class="mb-3">
+                    <label for="multipleTablesInput" class="form-label">Table Names (one per line)</label>
+                    <textarea class="form-control" id="multipleTablesInput" rows="12" placeholder="dwh_stg_EmailCampaignOwner&#10;dwh_stg_EmailCampaignType&#10;dwh_stg_EmailOutbox&#10;dwh_stg_EmailRating&#10;dwh_stg_EmailStatus&#10;dwh_stg_EmailType&#10;dwh_stg_Employee&#10;dwh_stg_EvaluationParameter&#10;dwh_stg_EventVersion&#10;dwh_stg_Exam"></textarea>
+                    <div class="form-text">Each line will create a new table pair. Empty lines will be ignored.</div>
+                </div>
+                <div class="alert alert-info small">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong>Note:</strong> The system will try to find matching table information from the available tables list. If a table is not found in the available tables, it will still be added but you may need to manually configure the primary keys and other settings.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" onclick="addMultipleTablePairs()">
+                    <i class="fas fa-plus me-1"></i>Add All Table Pairs
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Filters Modal -->
+<div class="modal fade" id="addFiltersModal" tabindex="-1" aria-labelledby="addFiltersModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addFiltersModalLabel">
+                    <i class="fas fa-filter me-2"></i>Add Filter Values to All Pairs
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">
+                    These values will be applied to the "Filter Values" field for all existing table pairs.
+                </p>
+                <div class="mb-3">
+                    <label for="prodFilterValue" class="form-label">PROD Filter Values</label>
+                    <input type="text" class="form-control" id="prodFilterValue" placeholder="value1, value2 | column2_value1, column2_value2">
+                    <div class="form-text">Use pipe separator for multiple columns: value1,value2 | column2_value1,column2_value2</div>
+                </div>
+                <div class="mb-3">
+                    <label for="devFilterValue" class="form-label">DEV Filter Values</label>
+                    <input type="text" class="form-control" id="devFilterValue" placeholder="value1, value2 | column2_value1, column2_value2">
+                    <div class="form-text">Use pipe separator for multiple columns: value1,value2 | column2_value1,column2_value2</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-info" onclick="applyFilterValues()">
+                    <i class="fas fa-check me-1"></i>Apply to All Pairs
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Ignore All Modal -->
+<div class="modal fade" id="ignoreAllModal" tabindex="-1" aria-labelledby="ignoreAllModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="ignoreAllModalLabel">
+                    <i class="fas fa-eye-slash me-2"></i>Mark Ignore Checkboxes
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">
+                    Select which environments should have their "Ignore" checkboxes marked for all table pairs.
+                </p>
+                <div class="checkbox-container mb-3" style="min-width: 200px;">
+                    <input class="checkbox-input" type="checkbox" id="ignoreProdCheckbox">
+                    <label class="checkbox-label" for="ignoreProdCheckbox">
+                        Mark all PROD "Ignore" checkboxes
+                    </label>
+                </div>
+                <div class="checkbox-container mb-3" style="min-width: 200px;">
+                    <input class="checkbox-input" type="checkbox" id="ignoreDevCheckbox">
+                    <label class="checkbox-label" for="ignoreDevCheckbox">
+                        Mark all DEV "Ignore" checkboxes
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" onclick="applyIgnoreAll()">
+                    <i class="fas fa-check me-1"></i>Apply to All Pairs
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Function to show Add Filters modal
+function showAddFiltersModal() {
+    const modal = new bootstrap.Modal(document.getElementById('addFiltersModal'));
+    modal.show();
+}
+
+// Function to apply filter values to all pairs
+function applyFilterValues() {
+    const prodFilterValue = document.getElementById('prodFilterValue').value.trim();
+    const devFilterValue = document.getElementById('devFilterValue').value.trim();
+    
+    if (!prodFilterValue && !devFilterValue) {
+        alert('Please enter at least one filter value.');
+        return;
+    }
+    
+    const pairs = document.querySelectorAll('.table-pair-item');
+    let updatedCount = 0;
+    
+    pairs.forEach(pair => {
+        if (prodFilterValue) {
+            const prodFilterInput = pair.querySelector('input[name*="prod_filter_values"]');
+            if (prodFilterInput) {
+                prodFilterInput.value = prodFilterValue;
+                updatedCount++;
+            }
+        }
+        
+        if (devFilterValue) {
+            const devFilterInput = pair.querySelector('input[name*="dev_filter_values"]');
+            if (devFilterInput) {
+                devFilterInput.value = devFilterValue;
+            }
+        }
+    });
+    
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('addFiltersModal'));
+    modal.hide();
+    
+    // Clear modal inputs
+    document.getElementById('prodFilterValue').value = '';
+    document.getElementById('devFilterValue').value = '';
+    
+    // Show success message
+    showStatusMessage(`Filter values applied to ${pairs.length} table pairs successfully!`, 'success', 3000);
+}
+
+// Function to show Ignore All modal
+function showIgnoreAllModal() {
+    const modal = new bootstrap.Modal(document.getElementById('ignoreAllModal'));
+    modal.show();
+    
+    // Ensure modal checkboxes use the same system as table pairs
+    setTimeout(() => {
+        initializeCheckboxes(); // Use the existing working function
+    }, 100);
+}
+
+// Function to apply ignore checkboxes to all pairs
+function applyIgnoreAll() {
+    const ignoreProd = document.getElementById('ignoreProdCheckbox').checked;
+    const ignoreDev = document.getElementById('ignoreDevCheckbox').checked;
+    
+    if (!ignoreProd && !ignoreDev) {
+        alert('Please select at least one environment to mark.');
+        return;
+    }
+    
+    const pairs = document.querySelectorAll('.table-pair-item');
+    let updatedCount = 0;
+    
+    pairs.forEach(pair => {
+        if (ignoreProd) {
+            const prodIgnoreCheckbox = pair.querySelector('input[name*="ignore_prod_pks"]');
+            if (prodIgnoreCheckbox) {
+                prodIgnoreCheckbox.checked = true;
+                prodIgnoreCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+                updatedCount++;
+            }
+        }
+        
+        if (ignoreDev) {
+            const devIgnoreCheckbox = pair.querySelector('input[name*="ignore_dev_pks"]');
+            if (devIgnoreCheckbox) {
+                devIgnoreCheckbox.checked = true;
+                devIgnoreCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+    });
+    
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('ignoreAllModal'));
+    modal.hide();
+    
+    // Clear modal inputs
+    document.getElementById('ignoreProdCheckbox').checked = false;
+    document.getElementById('ignoreDevCheckbox').checked = false;
+    
+    // Show success message
+    let message = 'Ignore checkboxes marked for ';
+    if (ignoreProd && ignoreDev) {
+        message += 'both PROD and DEV environments';
+    } else if (ignoreProd) {
+        message += 'PROD environment';
+    } else {
+        message += 'DEV environment';
+    }
+    message += ` across ${pairs.length} table pairs!`;
+    
+    showStatusMessage(message, 'success', 3000);
+}
+
+// Enhanced status message function (if not already defined in script.js)
+function showStatusMessage(message, type = 'info', duration = 5000) {
+    const alertClass = type === 'error' ? 'alert-danger' : `alert-${type}`;
+    const icon = type === 'error' ? 'fa-exclamation-triangle' : 
+                type === 'success' ? 'fa-check-circle' : 
+                type === 'warning' ? 'fa-exclamation-triangle' : 'fa-info-circle';
+    
+    const alertHTML = `
+        <div class="alert ${alertClass} alert-dismissible fade show slide-up" role="alert">
+            <i class="fas ${icon} me-2"></i>
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    `;
+    
+    // Insert at the top of main content
+    const mainContent = document.querySelector('.container-fluid');
+    if (mainContent) {
+        mainContent.insertAdjacentHTML('afterbegin', alertHTML);
+        
+        // Auto-dismiss after duration
+        if (duration > 0) {
+            setTimeout(() => {
+                const alert = mainContent.querySelector('.alert');
+                if (alert) {
+                    alert.style.opacity = '0';
+                    alert.style.transform = 'translateY(-20px)';
+                    setTimeout(() => alert.remove(), 300);
+                }
+            }, duration);
+        }
+    }
+}
+
+let availableTables = {{ available_tables|tojson }};
+const savedTablePairs = {{ saved_table_pairs|tojson }};
+const isFirstTime = {{ is_first_time|tojson }};
+
+if (availableTables.length > 0 && availableTables[0].length === 4) {
+    availableTables = availableTables.map(table => [
+        table[0],
+        table[1],
+        table[2],
+        table[2],
+        table[3]
+    ]);
+}
+
+function createSearchableSelect(name, selectedValue = '', callback = '') {
+    let options = '<option value="">Select a table...</option>';
+    let selectedText = 'Select a table...';
+    
+    availableTables.forEach(table => {
+        const selected = selectedValue === table[0] ? 'selected' : '';
+        if (selectedValue === table[0]) {
+            selectedText = table[1];
+        }
+        options += `<option value="${table[0]}" ${selected}>${table[1]}</option>`;
+    });
+    
+    const onChangeEvent = callback ? `onchange="updateTableSuggestions(this, '${name.includes('prod') ? 'prod' : 'dev'}'); ${callback};"` : `onchange="updateTableSuggestions(this, '${name.includes('prod') ? 'prod' : 'dev'}')"`;
+    
+    return `
+        <div class="searchable-select">
+            <input type="text" class="form-control form-control-sm search-input" placeholder="Type to search tables..." value="${selectedValue ? selectedText : ''}" onkeyup="filterTableOptions(this)" onfocus="showDropdown(this)">
+            <select class="form-control form-control-sm table-select d-none" name="${name}" ${onChangeEvent} required>
+                ${options}
+            </select>
+            <div class="dropdown-options" style="display: none;">
+                ${availableTables.map(table => 
+                    `<div class="dropdown-option" data-value="${table[0]}" onclick="selectTableOption(this, '${callback}')">${table[1]}</div>`
+                ).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function filterTableOptions(input) {
+    const searchTerm = input.value.toLowerCase();
+    const container = input.closest('.searchable-select');
+    const dropdown = container.querySelector('.dropdown-options');
+    const options = dropdown.querySelectorAll('.dropdown-option');
+    
+    let hasVisibleOptions = false;
+    options.forEach(option => {
+        const text = option.textContent.toLowerCase();
+        if (text.includes(searchTerm)) {
+            option.style.display = 'block';
+            hasVisibleOptions = true;
+        } else {
+            option.style.display = 'none';
+        }
+    });
+    
+    dropdown.style.display = searchTerm && hasVisibleOptions ? 'block' : 'none';
+}
+
+function selectTableOption(option, callback = '') {
+    const container = option.closest('.searchable-select');
+    const input = container.querySelector('.search-input');
+    const select = container.querySelector('.table-select');
+    const dropdown = container.querySelector('.dropdown-options');
+    
+    const value = option.getAttribute('data-value');
+    const text = option.textContent;
+    
+    input.value = text;
+    select.value = value;
+    dropdown.style.display = 'none';
+    
+    select.dispatchEvent(new Event('change'));
+    
+    // Execute callback if provided
+    if (callback) {
+        try {
+            eval(callback);
+        } catch (e) {
+            console.log('Callback execution error:', e);
+        }
+    }
+}
+
+function showDropdown(input) {
+    const container = input.closest('.searchable-select');
+    const dropdown = container.querySelector('.dropdown-options');
+    const options = dropdown.querySelectorAll('.dropdown-option');
+    options.forEach(option => { option.style.display = 'block'; });
+    dropdown.style.display = 'block';
+}
+
+// Global click handler - evita interferência com checkboxes
+document.addEventListener('click', function(e) {
+    // Não interfere com cliques em checkboxes
+    if (e.target.type === 'checkbox' || 
+        e.target.closest('.checkbox-container') || 
+        e.target.classList.contains('form-check-input') ||
+        e.target.classList.contains('form-check-label') ||
+        e.target.hasAttribute('for')) {
+        return; // Permite que o evento continue normalmente
+    }
+    
+    // Fecha dropdowns apenas se não for clique em checkbox
+    if (!e.target.closest('.searchable-select')) {
+        document.querySelectorAll('.dropdown-options').forEach(dropdown => {
+            dropdown.style.display = 'none';
+        });
+    }
+});
+
+function createTablePairHTML(index, pairData = null) {
+    const isFirst = index === 0;
+    const deleteButtonStyle = isFirst ? 'style="display: none;"' : '';
+    const prodTableName = pairData ? pairData.prod_table : 'Table1';
+    const devTableName = pairData ? pairData.dev_table : 'Table2';
+    const collapseId = `tablePairCollapse${index}`;
+    
+    return `
+        <div class="table-pair-item fade-in" data-index="${index}">
+            <div class="card">
+                <div class="card-header bg-primary text-white" role="button" data-bs-toggle="collapse" data-bs-target="#${collapseId}" aria-expanded="true" aria-controls="${collapseId}" style="cursor: pointer;">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0 d-flex align-items-center">
+                            <i class="fas fa-chevron-down me-2 collapse-icon" style="transition: transform 0.3s ease;"></i>
+                            <span class="badge bg-light text-dark me-2 p-2">
+                                <span class="pair-number">#${index + 1}</span>
+                            </span>
+                            <span class="pair-title">${prodTableName.split('.').pop() || 'Table1'} × ${devTableName.split('.').pop() || 'Table2'}</span>
+                        </h6>
+                        <button type="button" class="btn btn-danger btn-sm delete-btn" onclick="removeTablePair(this)" ${deleteButtonStyle}>
+                            <i class="fas fa-trash me-1"></i>Remove
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="collapse show" id="${collapseId}">
+                    <div class="card-body">
+            
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label">PROD Table</label>
+                            ${createSearchableSelect(`table_pairs-${index}-prod_table`, pairData ? pairData.prod_table : '', 'updatePairTitle(' + index + ')')}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">PROD Primary Keys
+                                <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Comma-separated primary keys for PROD (e.g., PK_User, PK_Order)"></i>
+                            </label>
+                            <div class="d-flex align-items-center">
+                                <input type="text" class="form-control me-2 form-control-sm" name="table_pairs-${index}-prod_primary_keys" value="${pairData ? pairData.prod_primary_keys : ''}" required style="flex: 1;">
+                                <div class="checkbox-container" style="min-width: 70px;">
+                                    <input class="checkbox-input" type="checkbox" name="table_pairs-${index}-ignore_prod_pks" id="ignore_prod_pks_${index}" ${pairData && pairData.ignore_prod_pks ? 'checked' : ''}>
+                                    <label class="checkbox-label small text-muted" for="ignore_prod_pks_${index}" data-bs-toggle="tooltip" data-bs-placement="top" title="Exclude PROD primary key columns from schema and data comparison">
+                                        Ignore
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label">DEV Table</label>
+                            ${createSearchableSelect(`table_pairs-${index}-dev_table`, pairData ? pairData.dev_table : '', 'updatePairTitle(' + index + ')')}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">DEV Primary Keys
+                                <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Comma-separated primary keys for DEV (e.g., idUser, idOrder)"></i>
+                            </label>
+                            <div class="d-flex align-items-center">
+                                <input type="text" class="form-control me-2 form-control-sm" name="table_pairs-${index}-dev_primary_keys" value="${pairData ? pairData.dev_primary_keys : ''}" required style="flex: 1;">
+                                <div class="checkbox-container" style="min-width: 70px;">
+                                    <input class="checkbox-input" type="checkbox" name="table_pairs-${index}-ignore_dev_pks" id="ignore_dev_pks_${index}" ${pairData && pairData.ignore_dev_pks ? 'checked' : ''}>
+                                    <label class="checkbox-label small text-muted" for="ignore_dev_pks_${index}" data-bs-toggle="tooltip" data-bs-placement="top" title="Exclude DEV primary key columns from schema and data comparison">
+                                        Ignore
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Display Name removed per requirement; display will use PROD x DEV -->
+            <input type="hidden" name="table_pairs-${index}-display_name" value="${pairData ? pairData.display_name : ''}">
+            
+            <div class="row mt-2">
+                <div class="col-md-12">
+                    <label class="form-label">Ignored Columns (pipe-separated)
+                        <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Use spaced pipe: Column1 | Column2 | Column3"></i>
+                    </label>
+                    <input type="text" class="form-control form-control-sm" name="table_pairs-${index}-ignored_columns" value="${pairData ? (pairData.ignored_columns || '').replace(/\n/g,' | ') : ''}">
+                </div>
+            </div>
+
+            <div class="row mt-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header row-filters-header d-flex justify-content-between align-items-center" role="button" data-bs-toggle="collapse" data-bs-target="#rowFilters-${index}" aria-expanded="false" aria-controls="rowFilters-${index}" style="cursor: pointer;">
+                            <h6 class="mb-0 d-flex align-items-center">
+                                <i class="fas fa-chevron-down me-2 row-filters-icon" style="transition: transform 0.3s ease;"></i>
+                                <i class="fas fa-filter me-2"></i>Row Filters
+                                <i class="fas fa-info-circle text-muted ms-2" data-bs-toggle="tooltip" data-bs-placement="top" title="Exclude known differing rows before querying. For multiple columns, provide comma-separated columns and values (one line per column) for exclusion."></i>
+                            </h6>
+                        </div>
+                        <div class="collapse" id="rowFilters-${index}">
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <label class="form-label">PROD Filter Columns
+                                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Comma-separated column names to match for exclusion in PROD."></i>
+                                                </label>
+                                                <input type="text" class="form-control form-control-sm" name="table_pairs-${index}-prod_filter_columns" value="${pairData && pairData.prod_filter_columns ? pairData.prod_filter_columns : (pairData ? pairData.prod_primary_keys : '')}">
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">PROD Filter Values
+                                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Use pipe separator for multiple columns: value1,value2 | column2_value1,column2_value2"></i>
+                                                </label>
+                                                <input type="text" class="form-control form-control-sm" name="table_pairs-${index}-prod_filter_values" value="${pairData && pairData.prod_filter_values ? pairData.prod_filter_values.replace(/\n/g, ' | ') : ''}" placeholder="value1, value2 | column2_value1, column2_value2">
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <label class="form-label">DEV Filter Columns
+                                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Comma-separated column names to match for exclusion in DEV."></i>
+                                                </label>
+                                                <input type="text" class="form-control form-control-sm" name="table_pairs-${index}-dev_filter_columns" value="${pairData && pairData.dev_filter_columns ? pairData.dev_filter_columns : (pairData ? pairData.dev_primary_keys : '')}">
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">DEV Filter Values
+                                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Use pipe separator for multiple columns: value1,value2 | column2_value1, column2_value2"></i>
+                                                </label>
+                                                <input type="text" class="form-control form-control-sm" name="table_pairs-${index}-dev_filter_values" value="${pairData && pairData.dev_filter_values ? pairData.dev_filter_values.replace(/\n/g, ' | ') : ''}" placeholder="value1, value2 | column2_value1, column2_value2">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function updatePairTitle(index) {
+    const container = document.querySelectorAll('.table-pair-item')[index];
+    if (!container) return;
+    
+    const prodSelect = container.querySelector(`select[name*="prod_table"]`);
+    const devSelect = container.querySelector(`select[name*="dev_table"]`);
+    const titleElement = container.querySelector('.pair-title');
+    
+    if (prodSelect && devSelect && titleElement) {
+        const prodTable = prodSelect.value ? prodSelect.value.split('.').pop() : 'Table1';
+        const devTable = devSelect.value ? devSelect.value.split('.').pop() : 'Table2';
+        titleElement.textContent = `${prodTable} × ${devTable}`;
+    }
+}
+
+// Function to show Add Multiple Pairs modal
+function showAddMultiplePairsModal() {
+    const modal = new bootstrap.Modal(document.getElementById('addMultiplePairsModal'));
+    modal.show();
+}
+
+// Function to add multiple table pairs from textarea input
+function addMultipleTablePairs() {
+    const input = document.getElementById('multipleTablesInput').value.trim();
+    
+    if (!input) {
+        alert('Please enter at least one table name.');
+        return;
+    }
+    
+    // Split by lines and filter out empty lines
+    const tableNames = input.split('\n')
+        .map(name => name.trim())
+        .filter(name => name.length > 0);
+    
+    if (tableNames.length === 0) {
+        alert('Please enter at least one valid table name.');
+        return;
+    }
+    
+    const container = document.getElementById('tablePairsContainer');
+    const currentCount = container.querySelectorAll('.table-pair-item').length;
+    let addedCount = 0;
+    
+    tableNames.forEach((tableName, index) => {
+        const newIndex = currentCount + index;
+        
+        // Try to find matching table data from available tables
+        const matchingTable = availableTables.find(table => 
+            table[0] === tableName || table[1] === tableName
+        );
+        
+        let pairData = null;
+        if (matchingTable) {
+            // Use found table data
+            pairData = {
+                prod_table: matchingTable[0],
+                dev_table: matchingTable[0],
+                display_name: matchingTable[1],
+                prod_primary_keys: matchingTable[2],
+                dev_primary_keys: matchingTable[3],
+                ignored_columns: matchingTable[4],
+                ignore_prod_pks: false,
+                ignore_dev_pks: false,
+                prod_filter_columns: matchingTable[2],
+                dev_filter_columns: matchingTable[3],
+                prod_filter_values: '',
+                dev_filter_values: ''
+            };
+        } else {
+            // Create basic pair data for unknown table
+            pairData = {
+                prod_table: tableName,
+                dev_table: tableName,
+                display_name: tableName,
+                prod_primary_keys: 'id', // Default primary key
+                dev_primary_keys: 'id',  // Default primary key
+                ignored_columns: '',
+                ignore_prod_pks: false,
+                ignore_dev_pks: false,
+                prod_filter_columns: 'id',
+                dev_filter_columns: 'id',
+                prod_filter_values: '',
+                dev_filter_values: ''
+            };
+        }
+        
+        const newPairHTML = createTablePairHTML(newIndex, pairData);
+        container.insertAdjacentHTML('beforeend', newPairHTML);
+        addedCount++;
+    });
+    
+    // Close modal
+    const modal = bootstrap.Modal.getInstance(document.getElementById('addMultiplePairsModal'));
+    modal.hide();
+    
+    // Clear modal input
+    document.getElementById('multipleTablesInput').value = '';
+    
+    // Initialize checkboxes and update UI
+    setTimeout(() => {
+        initializeCheckboxes();
+        updateUI();
+    }, 100);
+    
+    // Show success message
+    const foundTables = tableNames.filter(name => 
+        availableTables.find(table => table[0] === name || table[1] === name)
+    ).length;
+    
+    let message = `Successfully added ${addedCount} table pairs! `;
+    if (foundTables > 0) {
+        message += `${foundTables} tables were found in the available tables list with auto-configured settings. `;
+    }
+    if (addedCount - foundTables > 0) {
+        message += `${addedCount - foundTables} tables were added with default settings (please review and configure manually).`;
+    }
+    
+    showStatusMessage(message, 'success', 5000);
+}
+
+// Function to clear all table pairs and leave only one empty pair
+function clearAllTablePairs() {
+    // Confirm with user before clearing
+    if (!confirm('Are you sure you want to clear all table pairs? This action cannot be undone.')) {
+        return;
+    }
+    
+    const container = document.getElementById('tablePairsContainer');
+    
+    // Clear all existing pairs
+    container.innerHTML = '';
+    
+    // Add one empty table pair
+    const emptyPairHTML = createTablePairHTML(0);
+    container.insertAdjacentHTML('beforeend', emptyPairHTML);
+    
+    // Initialize checkboxes for the new empty pair
+    setTimeout(() => {
+        initializeCheckboxes();
+        updateUI();
+    }, 100);
+    
+    // Show success message
+    showStatusMessage('All table pairs cleared! One empty pair has been added.', 'success', 3000);
+}
+
+function addTablePair() {
+    const container = document.getElementById('tablePairsContainer');
+    const currentCount = container.querySelectorAll('.table-pair-item').length;
+    const newPairHTML = createTablePairHTML(currentCount);
+    container.insertAdjacentHTML('beforeend', newPairHTML);
+    
+    // Inicializa checkboxes para o novo par
+    initializeCheckboxes();
+    updateUI();
+}
+
+function removeTablePair(button) {
+    const pairItem = button.closest('.table-pair-item');
+    pairItem.remove();
+    rebuildAllPairs();
+    updateUI();
+}
+
+function rebuildAllPairs() {
+    const container = document.getElementById('tablePairsContainer');
+    const pairs = container.querySelectorAll('.table-pair-item');
+    const pairsData = [];
+    pairs.forEach((pair) => {
+        const data = {
+            prod_table: pair.querySelector('select[name*="prod_table"]').value,
+            dev_table: pair.querySelector('select[name*="dev_table"]').value,
+            display_name: pair.querySelector('input[name*="display_name"]').value,
+            prod_primary_keys: pair.querySelector('input[name*="prod_primary_keys"]').value,
+            dev_primary_keys: pair.querySelector('input[name*="dev_primary_keys"]').value,
+            ignored_columns: pair.querySelector('input[name*="ignored_columns"]').value,
+            ignore_prod_pks: pair.querySelector('input[name*="ignore_prod_pks"]').checked,
+            ignore_dev_pks: pair.querySelector('input[name*="ignore_dev_pks"]').checked,
+            prod_filter_columns: pair.querySelector('input[name*="prod_filter_columns"]').value,
+            prod_filter_values: pair.querySelector('input[name*="prod_filter_values"]').value,
+            dev_filter_columns: pair.querySelector('input[name*="dev_filter_columns"]').value,
+            dev_filter_values: pair.querySelector('input[name*="dev_filter_values"]').value
+        };
+        pairsData.push(data);
+    });
+    container.innerHTML = '';
+    pairsData.forEach((data, index) => {
+        const pairHTML = createTablePairHTML(index, data);
+        container.insertAdjacentHTML('beforeend', pairHTML);
+    });
+    
+    // Reinicializa checkboxes após reconstruir
+    initializeCheckboxes();
+}
+
+// Função simplificada para inicializar checkboxes
+function initializeCheckboxes() {
+    console.log('Initializing checkboxes...');
+    
+    // Remove event listeners anteriores
+    document.removeEventListener('change', handleCheckboxChange, true);
+    document.removeEventListener('click', handleLabelClick, true);
+    
+    // Adiciona event listeners globais
+    document.addEventListener('change', handleCheckboxChange, true);
+    document.addEventListener('click', handleLabelClick, true);
+    
+    // Configura estilos para todos os checkboxes
+    document.querySelectorAll('.checkbox-input').forEach(checkbox => {
+        checkbox.style.cursor = 'pointer';
+        checkbox.style.pointerEvents = 'auto';
+    });
+    
+    document.querySelectorAll('.checkbox-label').forEach(label => {
+        label.style.cursor = 'pointer';
+        label.style.pointerEvents = 'auto';
+    });
+}
+
+// Handler para mudanças em checkboxes
+function handleCheckboxChange(e) {
+    if (e.target.classList.contains('checkbox-input')) {
+        console.log(`Checkbox ${e.target.name} changed to: ${e.target.checked}`);
+        e.stopPropagation();
+    }
+}
+
+// Handler para cliques em labels
+function handleLabelClick(e) {
+    if (e.target.classList.contains('checkbox-label')) {
+        const forId = e.target.getAttribute('for');
+        if (forId) {
+            const checkbox = document.getElementById(forId);
+            if (checkbox) {
+                e.preventDefault();
+                checkbox.checked = !checkbox.checked;
+                console.log(`Label clicked for ${checkbox.name}, new state: ${checkbox.checked}`);
+                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+        e.stopPropagation();
+    }
+}
+
+function updateUI() {
+    const count = document.querySelectorAll('.table-pair-item').length;
+    document.getElementById('tablePairCount').textContent = count;
+    const btn = document.getElementById('compareBtn');
+    const btnText = document.getElementById('compareBtnText');
+    if (count === 0) {
+        btnText.textContent = 'No Tables Configured';
+        btn.disabled = true;
+    } else if (count === 1) {
+        btnText.textContent = 'Start Single Table Comparison';
+        btn.disabled = false;
+    } else {
+        btnText.textContent = `Start Batch Comparison (${count} tables)`;
+        btn.disabled = false;
+    }
+    const deleteButtons = document.querySelectorAll('.delete-btn');
+    deleteButtons.forEach(btn => { btn.style.display = count <= 1 ? 'none' : 'inline-block'; });
+}
+
+function updateTableSuggestions(selectElement, type) {
+    const tableName = selectElement.value;
+    if (!tableName) return;
+    const pairItem = selectElement.closest('.table-pair-item');
+    const container = selectElement.closest('.searchable-select');
+    const input = container.querySelector('.search-input');
+    const selectedTable = availableTables.find(table => table[0] === tableName);
+    if (selectedTable) { input.value = selectedTable[1]; }
+    const tableData = selectedTable;
+    if (!tableData) return;
+    const displayNameInput = pairItem.querySelector('input[name*="display_name"]');
+    if (!displayNameInput.value || availableTables.some(t => displayNameInput.value === t[1])) {
+        displayNameInput.value = tableData[1];
+    }
+    const prodPrimaryKeysInput = pairItem.querySelector('input[name*="prod_primary_keys"]');
+    const devPrimaryKeysInput = pairItem.querySelector('input[name*="dev_primary_keys"]');
+    const prodFilterColumnsInput = pairItem.querySelector('input[name*="prod_filter_columns"]');
+    const devFilterColumnsInput = pairItem.querySelector('input[name*="dev_filter_columns"]');
+    
+    if (!prodPrimaryKeysInput.value) { prodPrimaryKeysInput.value = tableData[2]; }
+    if (!devPrimaryKeysInput.value) { devPrimaryKeysInput.value = tableData[3]; }
+    
+    // Auto-populate filter columns with primary keys
+    if (type === 'prod' && !prodFilterColumnsInput.value) {
+        prodFilterColumnsInput.value = tableData[2];
+    }
+    if (type === 'dev' && !devFilterColumnsInput.value) {
+        devFilterColumnsInput.value = tableData[3];
+    }
+    
+    const ignoredColumnsTextarea = pairItem.querySelector('input[name*="ignored_columns"]');
+    if (!ignoredColumnsTextarea.value) { ignoredColumnsTextarea.value = tableData[4]; }
+    const otherType = type === 'prod' ? 'dev' : 'prod';
+    const otherSelect = pairItem.querySelector(`select[name*="${otherType}_table"]`);
+    if (!otherSelect.value) {
+        otherSelect.value = tableName;
+        const otherContainer = otherSelect.closest('.searchable-select');
+        const otherInput = otherContainer.querySelector('.search-input');
+        if (selectedTable) { otherInput.value = selectedTable[1]; }
+        if (otherType === 'prod' && !prodPrimaryKeysInput.value) { prodPrimaryKeysInput.value = tableData[2]; }
+        if (otherType === 'dev' && !devPrimaryKeysInput.value) { devPrimaryKeysInput.value = tableData[3]; }
+        
+        // Auto-populate filter columns for the other type as well
+        if (otherType === 'prod' && !prodFilterColumnsInput.value) {
+            prodFilterColumnsInput.value = tableData[2];
+        }
+        if (otherType === 'dev' && !devFilterColumnsInput.value) {
+            devFilterColumnsInput.value = tableData[3];
+        }
+    }
+}
+
+function validateForm() {
+    const pairs = document.querySelectorAll('.table-pair-item');
+    if (pairs.length === 0) { alert('Please add at least one table pair for comparison'); return false; }
+    for (let i = 0; i < pairs.length; i++) {
+        const pair = pairs[i];
+        const prodTable = pair.querySelector('select[name*="prod_table"]').value;
+        const devTable = pair.querySelector('select[name*="dev_table"]').value;
+        const prodPrimaryKeys = pair.querySelector('input[name*="prod_primary_keys"]').value;
+        const devPrimaryKeys = pair.querySelector('input[name*="dev_primary_keys"]').value;
+        if (!prodTable || !devTable) { alert(`Table pair ${i + 1}: Please select both PROD and DEV tables`); return false; }
+        if (!prodPrimaryKeys.trim()) { alert(`Table pair ${i + 1}: PROD primary keys are required`); return false; }
+        if (!devPrimaryKeys.trim()) { alert(`Table pair ${i + 1}: DEV primary keys are required`); return false; }
+    }
+    return true;
+}
+
+function initializeTablePairs() {
+    const container = document.getElementById('tablePairsContainer');
+    if (savedTablePairs && savedTablePairs.length > 0) {
+        savedTablePairs.forEach((pairData, index) => {
+            const mapFiltersToFields = (filtersObj) => {
+                if (!filtersObj) return { cols: '', vals: '' };
+                const columns = Object.keys(filtersObj);
+                const cols = columns.join(', ');
+                const vals = columns.map(col => (filtersObj[col] || []).join(', ')).join('\n');
+                return { cols, vals };
+            };
+            const prodMap = mapFiltersToFields(pairData.prod_row_filters);
+            const devMap = mapFiltersToFields(pairData.dev_row_filters);
+            const extended = {
+                ...pairData,
+                prod_filter_columns: prodMap.cols || pairData.prod_primary_keys || '',
+                prod_filter_values: prodMap.vals,
+                dev_filter_columns: devMap.cols || pairData.dev_primary_keys || '',
+                dev_filter_values: devMap.vals
+            };
+            const pairHTML = createTablePairHTML(index, extended);
+            container.insertAdjacentHTML('beforeend', pairHTML);
+        });
+    } else {
+        if (isFirstTime) {
+            const pairHTML = createTablePairHTML(0);
+            container.insertAdjacentHTML('beforeend', pairHTML);
+        } else if (availableTables.length > 0) {
+            const defaultPair = {
+                prod_table: availableTables[0][0],
+                dev_table: availableTables[0][0],
+                display_name: availableTables[0][1],
+                prod_primary_keys: availableTables[0][2],
+                dev_primary_keys: availableTables[0][3],
+                ignored_columns: availableTables[0][4],
+                ignore_prod_pks: false,
+                ignore_dev_pks: false,
+                prod_filter_columns: availableTables[0][2],
+                dev_filter_columns: availableTables[0][3]
+            };
+            const pairHTML = createTablePairHTML(0, defaultPair);
+            container.insertAdjacentHTML('beforeend', pairHTML);
+        } else {
+            const pairHTML = createTablePairHTML(0);
+            container.insertAdjacentHTML('beforeend', pairHTML);
+        }
+    }
+    
+    // Initialize checkboxes after creating all pairs
+    setTimeout(() => {
+        initializeCheckboxes();
+        updateUI();
+    }, 100);
+}
+
+// Global variable to store comparison ID and monitoring interval
+let currentComparisonId = null;
+let monitoringInterval = null;
+
+// Function to monitor comparison status
+function monitorComparison() {
+    const form = document.getElementById('comparisonForm');
+    form.addEventListener('submit', function(e) {
+        setTimeout(() => {
+            startStatusPolling();
+        }, 1000);
+    });
+}
+
+// Function to start polling comparison status
+function startStatusPolling() {
+    fetch('/api/status/latest')
+        .then(response => response.json())
+        .then(data => {
+            if (data.comparison_id) {
+                currentComparisonId = data.comparison_id;
+                pollComparisonStatus();
+                updateNavbarResults();
+            }
+        })
+        .catch(error => {
+            console.log('No active comparison found');
+        });
+}
+
+// Function to poll comparison status
+function pollComparisonStatus() {
+    if (!currentComparisonId) return;
+    
+    monitoringInterval = setInterval(() => {
+        fetch(`/api/status/${currentComparisonId}`)
+            .then(response => response.json())
+            .then(data => {
+                updateComparisonStatus(data);
+                
+                if (data.status === 'completed' || data.status === 'error') {
+                    clearInterval(monitoringInterval);
+                    showCompletionAlert(data.status);
+                    updateNavbarResults();
+                }
+            })
+            .catch(error => {
+                console.error('Error polling status:', error);
+            });
+    }, 2000);
+}
+
+// Function to update comparison status display
+function updateComparisonStatus(data) {
+    const btn = document.getElementById('compareBtn');
+    
+    if (data.status === 'running') {
+        btn.innerHTML = `<i class="fas fa-spinner fa-spin me-2"></i>${data.progress || 'Running Comparison...'}`;
+        btn.disabled = true;
+    }
+}
+
+// Function to show completion alert
+function showCompletionAlert(status) {
+    const btn = document.getElementById('compareBtn');
+    
+    if (status === 'completed') {
+        const alertHtml = `
+            <div class="alert alert-success alert-dismissible fade show" role="alert" id="completionAlert">
+                <i class="fas fa-check-circle me-2"></i>
+                <strong>Comparison Complete!</strong> Your comparison has finished successfully. 
+                <a href="/results/${currentComparisonId}" class="alert-link">View Results</a>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+        
+        const container = document.querySelector('.container-fluid');
+        container.insertAdjacentHTML('afterbegin', alertHtml);
+        
+        btn.innerHTML = '<i class="fas fa-play me-2"></i>Start New Comparison';
+        btn.disabled = false;
+        
+        setTimeout(() => {
+            const alert = document.getElementById('completionAlert');
+            if (alert) {
+                alert.remove();
+            }
+        }, 10000);
+        
+    } else if (status === 'error') {
+        const alertHtml = `
+            <div class="alert alert-danger alert-dismissible fade show" role="alert" id="completionAlert">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                <strong>Comparison Failed!</strong> There was an error during the comparison process.
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        `;
+        
+        const container = document.querySelector('.container-fluid');
+        container.insertAdjacentHTML('afterbegin', alertHtml);
+        
+        btn.innerHTML = '<i class="fas fa-play me-2"></i>Retry Comparison';
+        btn.disabled = false;
+        
+        setTimeout(() => {
+            const alert = document.getElementById('completionAlert');
+            if (alert) {
+                alert.remove();
+            }
+        }, 10000);
+    }
+}
+
+// Function to update navbar results link
+function updateNavbarResults() {
+    if (typeof window.updateResultsNavLink === 'function') {
+        window.updateResultsNavLink();
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    initializeTablePairs();
+    
+    document.getElementById('comparisonForm').addEventListener('submit', function(e) {
+        if (!validateForm()) {
+            e.preventDefault();
+            return false;
+        }
+        const btn = document.getElementById('compareBtn');
+        const count = document.querySelectorAll('.table-pair-item').length;
+        if (count === 1) {
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Starting Single Comparison...';
+        } else {
+            btn.innerHTML = `<i class="fas fa-spinner fa-spin me-2"></i>Starting Batch Comparison (${count} tables)...`;
+        }
+        btn.disabled = true;
+        
+        monitorComparison();
+    });
+    
+    // Event listeners for collapse functionality
+    document.addEventListener('show.bs.collapse', function(e) {
+        const collapseElement = e.target;
+        if (collapseElement.id.includes('tablePairCollapse')) {
+            const card = collapseElement.closest('.table-pair-item');
+            const icon = card.querySelector('.collapse-icon');
+            if (icon) {
+                icon.style.transform = 'rotate(0deg)';
+            }
+        } else if (collapseElement.id.includes('rowFilters')) {
+            const card = collapseElement.closest('.card');
+            const icon = card.querySelector('.row-filters-icon');
+            if (icon) {
+                icon.style.transform = 'rotate(0deg)';
+            }
+        }
+    });
+
+    document.addEventListener('hide.bs.collapse', function(e) {
+        const collapseElement = e.target;
+        if (collapseElement.id.includes('tablePairCollapse')) {
+            const card = collapseElement.closest('.table-pair-item');
+            const icon = card.querySelector('.collapse-icon');
+            if (icon) {
+                icon.style.transform = 'rotate(-90deg)';
+            }
+        } else if (collapseElement.id.includes('rowFilters')) {
+            const card = collapseElement.closest('.card');
+            const icon = card.querySelector('.row-filters-icon');
+            if (icon) {
+                icon.style.transform = 'rotate(-90deg)';
+            }
+        }
+    });
+
+    // Initialize tooltips
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl, {
+            delay: { show: 500, hide: 100 }
+        });
+    });
+    
+    // Check if there's an ongoing comparison
+    fetch('/api/status/latest')
+        .then(response => response.json())
+        .then(data => {
+            if (data.comparison_id && (data.status === 'running' || data.status === 'pending')) {
+                currentComparisonId = data.comparison_id;
+                pollComparisonStatus();
+                
+                const btn = document.getElementById('compareBtn');
+                btn.innerHTML = `<i class="fas fa-spinner fa-spin me-2"></i>${data.progress || 'Running Comparison...'}`;
+                btn.disabled = true;
+            } else if (data.comparison_id && data.status === 'completed') {
+                currentComparisonId = data.comparison_id;
+            }
+        })
+        .catch(error => {
+            // No active comparison, this is normal
+        });
+});
+</script>
+{% endblock %}

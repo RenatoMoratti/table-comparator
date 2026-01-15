@@ -1,0 +1,16 @@
+[
+  {
+    "table_name": "schema.table1",
+    "display_name": "Dimension Example 1",
+    "prod_primary_keys": "PK_Table1",
+    "dev_primary_keys": "PK_Table1",
+    "ignored_columns": "__processing_timestamp_utc | __year | __month | __day"
+  },
+  {
+    "table_name": "schema.table2",
+    "display_name": "Dimension Example 2",
+    "prod_primary_keys": "PK_Table2",
+    "dev_primary_keys": "PK_Table2",
+    "ignored_columns": "__processing_timestamp_utc | __year | __month | __day"
+  }
+]

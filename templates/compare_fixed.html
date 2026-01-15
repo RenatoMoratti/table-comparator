@@ -1,0 +1,459 @@
+{% extends "base.html" %}
+
+{% block title %}Database Table Comparator - Compare{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('compare') }}" id="comparisonForm">
+                    {{ form.hidden_tag() }}
+                    
+                    <!-- Hidden settings populated from your saved Settings -->
+                    <input type="hidden" name="float_tolerance" value="{{ form.float_tolerance.data }}">
+                    <input type="hidden" name="max_rows_limit" value="{{ form.max_rows_limit.data }}">
+                    <input type="hidden" name="dev_host" value="{{ form.dev_host.data }}">
+                    <input type="hidden" name="dev_port" value="{{ form.dev_port.data }}">
+                    <input type="hidden" name="dev_database" value="{{ form.dev_database.data }}">
+                    <input type="hidden" name="dev_token" value="{{ form.dev_token.data }}">
+                    <input type="hidden" name="prod_host" value="{{ form.prod_host.data }}">
+                    <input type="hidden" name="prod_port" value="{{ form.prod_port.data }}">
+                    <input type="hidden" name="prod_database" value="{{ form.prod_database.data }}">
+                    <input type="hidden" name="prod_token" value="{{ form.prod_token.data }}">
+
+                    <!-- Table Pairs Configuration -->
+                    <div class="card mb-4">
+                        <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <i class="fas fa-table me-2"></i>
+                                Table Pairs Configuration
+                            </h5>
+                            <div class="d-flex align-items-center">
+                                <span class="me-3 small">Configured: <strong><span id="tablePairCount">0</span></strong></span>
+                                <button type="button" class="btn btn-light btn-sm" onclick="addTablePair()">
+                                <i class="fas fa-plus me-1"></i>Add Table Pair
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="tablePairsContainer">
+                                <!-- Table pairs will be added here dynamically -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <div class="text-center">
+                        <button type="submit" class="btn btn-primary btn-lg" id="compareBtn">
+                            <i class="fas fa-play me-2"></i>
+                            <span id="compareBtnText">Start Comparison</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let availableTables = {{ available_tables|tojson }};
+const savedTablePairs = {{ saved_table_pairs|tojson }};
+
+if (availableTables.length > 0 && availableTables[0].length === 4) {
+    availableTables = availableTables.map(table => [
+        table[0],
+        table[1],
+        table[2],
+        table[2],
+        table[3]
+    ]);
+}
+
+function createSearchableSelect(name, selectedValue = '') {
+    let options = '<option value="">Select a table...</option>';
+    let selectedText = 'Select a table...';
+    
+    availableTables.forEach(table => {
+        const selected = selectedValue === table[0] ? 'selected' : '';
+        if (selectedValue === table[0]) {
+            selectedText = `${table[1]} (${table[0]})`;
+        }
+        options += `<option value="${table[0]}" ${selected}>${table[1]} (${table[0]})</option>`;
+    });
+    
+    return `
+        <div class="searchable-select">
+            <input type="text" class="form-control search-input" placeholder="Type to search tables..." value="${selectedValue ? selectedText : ''}" onkeyup="filterTableOptions(this)" onfocus="showDropdown(this)">
+            <select class="form-control table-select d-none" name="${name}" onchange="updateTableSuggestions(this, '${name.includes('prod') ? 'prod' : 'dev'}')" required>
+                ${options}
+            </select>
+            <div class="dropdown-options" style="display: none;">
+                ${availableTables.map(table => 
+                    `<div class="dropdown-option" data-value="${table[0]}" onclick="selectTableOption(this)">${table[1]} (${table[0]})</div>`
+                ).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function filterTableOptions(input) {
+    const searchTerm = input.value.toLowerCase();
+    const container = input.closest('.searchable-select');
+    const dropdown = container.querySelector('.dropdown-options');
+    const options = dropdown.querySelectorAll('.dropdown-option');
+    
+    let hasVisibleOptions = false;
+    options.forEach(option => {
+        const text = option.textContent.toLowerCase();
+        if (text.includes(searchTerm)) {
+            option.style.display = 'block';
+            hasVisibleOptions = true;
+        } else {
+            option.style.display = 'none';
+        }
+    });
+    
+    dropdown.style.display = searchTerm && hasVisibleOptions ? 'block' : 'none';
+}
+
+function selectTableOption(option) {
+    const container = option.closest('.searchable-select');
+    const input = container.querySelector('.search-input');
+    const select = container.querySelector('.table-select');
+    const dropdown = container.querySelector('.dropdown-options');
+    
+    const value = option.getAttribute('data-value');
+    const text = option.textContent;
+    
+    input.value = text;
+    select.value = value;
+    dropdown.style.display = 'none';
+    
+    select.dispatchEvent(new Event('change'));
+}
+
+function showDropdown(input) {
+    const container = input.closest('.searchable-select');
+    const dropdown = container.querySelector('.dropdown-options');
+    const options = dropdown.querySelectorAll('.dropdown-option');
+    options.forEach(option => { option.style.display = 'block'; });
+    dropdown.style.display = 'block';
+}
+
+document.addEventListener('click', function(e) {
+    if (!e.target.closest('.searchable-select')) {
+        document.querySelectorAll('.dropdown-options').forEach(dropdown => {
+            dropdown.style.display = 'none';
+        });
+    }
+});
+
+function createTablePairHTML(index, pairData = null) {
+    const isFirst = index === 0;
+    const deleteButtonStyle = isFirst ? 'style="display: none;"' : '';
+    
+    return `
+        <div class="table-pair-item border rounded p-3 mb-3 bg-light" data-index="${index}" style="border: 2px solid #007bff !important;">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="mb-0">
+                    <i class="fas fa-database me-2"></i>
+                    Table Pair #<span class="pair-number">${index + 1}</span>
+                </h6>
+                <button type="button" class="btn btn-danger btn-sm delete-btn" onclick="removeTablePair(this)" ${deleteButtonStyle}>
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+            
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label">PROD Table</label>
+                            ${createSearchableSelect(`table_pairs-${index}-prod_table`, pairData ? pairData.prod_table : '')}
+                        </div>
+                        <div class="col-md-6">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <label class="form-label mb-0">PROD Primary Keys
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Comma-separated primary keys for PROD (e.g., PK_User, PK_Order)"></i>
+                                </label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="table_pairs-${index}-ignore_prod_pks" id="ignore_prod_pks_${index}" ${pairData && pairData.ignore_prod_pks ? 'checked' : ''}>
+                                    <label class="form-check-label small text-muted" for="ignore_prod_pks_${index}">
+                                        Ignore <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Exclude PROD primary key columns from schema and data comparison"></i>
+                                    </label>
+                                </div>
+                            </div>
+                            <input type="text" class="form-control" name="table_pairs-${index}-prod_primary_keys" value="${pairData ? pairData.prod_primary_keys : ''}" required>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label class="form-label">DEV Table</label>
+                            ${createSearchableSelect(`table_pairs-${index}-dev_table`, pairData ? pairData.dev_table : '')}
+                        </div>
+                        <div class="col-md-6">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <label class="form-label mb-0">DEV Primary Keys
+                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Comma-separated primary keys for DEV (e.g., idUser, idOrder)"></i>
+                                </label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="table_pairs-${index}-ignore_dev_pks" id="ignore_dev_pks_${index}" ${pairData && pairData.ignore_dev_pks ? 'checked' : ''}>
+                                    <label class="form-check-label small text-muted" for="ignore_dev_pks_${index}">
+                                        Ignore <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Exclude DEV primary key columns from schema and data comparison"></i>
+                                    </label>
+                                </div>
+                            </div>
+                            <input type="text" class="form-control" name="table_pairs-${index}-dev_primary_keys" value="${pairData ? pairData.dev_primary_keys : ''}" required>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Display Name removed per requirement; display will use PROD x DEV -->
+            <input type="hidden" name="table_pairs-${index}-display_name" value="${pairData ? pairData.display_name : ''}">
+            
+            <div class="row mt-2">
+                <div class="col-md-12">
+                    <label class="form-label">Ignored Columns (pipe-separated)
+                        <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Use spaced pipe: Column1 | Column2 | Column3"></i>
+                    </label>
+                    <input type="text" class="form-control" name="table_pairs-${index}-ignored_columns" value="${pairData ? (pairData.ignored_columns || '').replace(/\n/g,' | ') : ''}">
+                </div>
+            </div>
+
+            <div class="row mt-3">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0 d-flex align-items-center">
+                                <i class="fas fa-filter me-2"></i>Row Filters
+                                <i class="fas fa-info-circle text-muted ms-2" data-bs-toggle="tooltip" data-bs-placement="top" title="Exclude known differing rows before querying. For multiple columns, provide comma-separated columns and values (one line per column) for exclusion."></i>
+                            </h6>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#rowFilters-${index}" aria-expanded="false" aria-controls="rowFilters-${index}">
+                                <i class="fas fa-chevron-down me-1"></i>Toggle Filters
+                            </button>
+                        </div>
+                        <div class="collapse" id="rowFilters-${index}">
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <label class="form-label">PROD Filter Columns
+                                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Comma-separated column names to match for exclusion in PROD."></i>
+                                                </label>
+                                                <input type="text" class="form-control" name="table_pairs-${index}-prod_filter_columns" value="${pairData && pairData.prod_filter_columns ? pairData.prod_filter_columns : (pairData ? pairData.prod_primary_keys : '')}">
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">PROD Filter Values
+                                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Provide one line per column. Each line contains comma-separated values to exclude."></i>
+                                                </label>
+                                                <textarea class="form-control" name="table_pairs-${index}-prod_filter_values" rows="3">${pairData && pairData.prod_filter_values ? pairData.prod_filter_values : ''}</textarea>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <label class="form-label">DEV Filter Columns
+                                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Comma-separated column names to match for exclusion in DEV."></i>
+                                                </label>
+                                                <input type="text" class="form-control" name="table_pairs-${index}-dev_filter_columns" value="${pairData && pairData.dev_filter_columns ? pairData.dev_filter_columns : (pairData ? pairData.dev_primary_keys : '')}">
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">DEV Filter Values
+                                                    <i class="fas fa-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="Provide one line per column. Each line contains comma-separated values to exclude."></i>
+                                                </label>
+                                                <textarea class="form-control" name="table_pairs-${index}-dev_filter_values" rows="3">${pairData && pairData.dev_filter_values ? pairData.dev_filter_values : ''}</textarea>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function addTablePair() {
+    const container = document.getElementById('tablePairsContainer');
+    const currentCount = container.querySelectorAll('.table-pair-item').length;
+    const newPairHTML = createTablePairHTML(currentCount);
+    container.insertAdjacentHTML('beforeend', newPairHTML);
+    updateUI();
+}
+
+function removeTablePair(button) {
+    const pairItem = button.closest('.table-pair-item');
+    pairItem.remove();
+    rebuildAllPairs();
+    updateUI();
+}
+
+function rebuildAllPairs() {
+    const container = document.getElementById('tablePairsContainer');
+    const pairs = container.querySelectorAll('.table-pair-item');
+    const pairsData = [];
+    pairs.forEach((pair) => {
+        const data = {
+            prod_table: pair.querySelector('select[name*="prod_table"]').value,
+            dev_table: pair.querySelector('select[name*="dev_table"]').value,
+            display_name: pair.querySelector('input[name*="display_name"]').value,
+            prod_primary_keys: pair.querySelector('input[name*="prod_primary_keys"]').value,
+            dev_primary_keys: pair.querySelector('input[name*="dev_primary_keys"]').value,
+            ignored_columns: pair.querySelector('input[name*="ignored_columns"]').value,
+            ignore_prod_pks: pair.querySelector('input[name*="ignore_prod_pks"]').checked,
+            ignore_dev_pks: pair.querySelector('input[name*="ignore_dev_pks"]').checked,
+            prod_filter_columns: pair.querySelector('input[name*="prod_filter_columns"]').value,
+            prod_filter_values: pair.querySelector('textarea[name*="prod_filter_values"]').value,
+            dev_filter_columns: pair.querySelector('input[name*="dev_filter_columns"]').value,
+            dev_filter_values: pair.querySelector('textarea[name*="dev_filter_values"]').value
+        };
+        pairsData.push(data);
+    });
+    container.innerHTML = '';
+    pairsData.forEach((data, index) => {
+        const pairHTML = createTablePairHTML(index, data);
+        container.insertAdjacentHTML('beforeend', pairHTML);
+    });
+}
+
+function updateUI() {
+    const count = document.querySelectorAll('.table-pair-item').length;
+    document.getElementById('tablePairCount').textContent = count;
+    const btn = document.getElementById('compareBtn');
+    const btnText = document.getElementById('compareBtnText');
+    if (count === 0) {
+        btnText.textContent = 'No Tables Configured';
+        btn.disabled = true;
+    } else if (count === 1) {
+        btnText.textContent = 'Start Single Table Comparison';
+        btn.disabled = false;
+    } else {
+        btnText.textContent = `Start Batch Comparison (${count} tables)`;
+        btn.disabled = false;
+    }
+    const deleteButtons = document.querySelectorAll('.delete-btn');
+    deleteButtons.forEach(btn => { btn.style.display = count <= 1 ? 'none' : 'inline-block'; });
+}
+
+function updateTableSuggestions(selectElement, type) {
+    const tableName = selectElement.value;
+    if (!tableName) return;
+    const pairItem = selectElement.closest('.table-pair-item');
+    const container = selectElement.closest('.searchable-select');
+    const input = container.querySelector('.search-input');
+    const selectedTable = availableTables.find(table => table[0] === tableName);
+    if (selectedTable) { input.value = `${selectedTable[1]} (${selectedTable[0]})`; }
+    const tableData = selectedTable;
+    if (!tableData) return;
+    const displayNameInput = pairItem.querySelector('input[name*="display_name"]');
+    if (!displayNameInput.value || availableTables.some(t => displayNameInput.value === t[1])) {
+        displayNameInput.value = tableData[1];
+    }
+    const prodPrimaryKeysInput = pairItem.querySelector('input[name*="prod_primary_keys"]');
+    const devPrimaryKeysInput = pairItem.querySelector('input[name*="dev_primary_keys"]');
+    if (!prodPrimaryKeysInput.value) { prodPrimaryKeysInput.value = tableData[2]; }
+    if (!devPrimaryKeysInput.value) { devPrimaryKeysInput.value = tableData[3]; }
+    const ignoredColumnsTextarea = pairItem.querySelector('input[name*="ignored_columns"]');
+    if (!ignoredColumnsTextarea.value) { ignoredColumnsTextarea.value = tableData[4]; }
+    const otherType = type === 'prod' ? 'dev' : 'prod';
+    const otherSelect = pairItem.querySelector(`select[name*="${otherType}_table"]`);
+    if (!otherSelect.value) {
+        otherSelect.value = tableName;
+        const otherContainer = otherSelect.closest('.searchable-select');
+        const otherInput = otherContainer.querySelector('.search-input');
+        if (selectedTable) { otherInput.value = `${selectedTable[1]} (${selectedTable[0]})`; }
+        if (otherType === 'prod' && !prodPrimaryKeysInput.value) { prodPrimaryKeysInput.value = tableData[2]; }
+        if (otherType === 'dev' && !devPrimaryKeysInput.value) { devPrimaryKeysInput.value = tableData[3]; }
+    }
+}
+
+function validateForm() {
+    const pairs = document.querySelectorAll('.table-pair-item');
+    if (pairs.length === 0) { alert('Please add at least one table pair for comparison'); return false; }
+    for (let i = 0; i < pairs.length; i++) {
+        const pair = pairs[i];
+        const prodTable = pair.querySelector('select[name*="prod_table"]').value;
+        const devTable = pair.querySelector('select[name*="dev_table"]').value;
+        const prodPrimaryKeys = pair.querySelector('input[name*="prod_primary_keys"]').value;
+        const devPrimaryKeys = pair.querySelector('input[name*="dev_primary_keys"]').value;
+        if (!prodTable || !devTable) { alert(`Table pair ${i + 1}: Please select both PROD and DEV tables`); return false; }
+        if (!prodPrimaryKeys.trim()) { alert(`Table pair ${i + 1}: PROD primary keys are required`); return false; }
+        if (!devPrimaryKeys.trim()) { alert(`Table pair ${i + 1}: DEV primary keys are required`); return false; }
+    }
+    return true;
+}
+
+function initializeTablePairs() {
+    const container = document.getElementById('tablePairsContainer');
+    if (savedTablePairs && savedTablePairs.length > 0) {
+        savedTablePairs.forEach((pairData, index) => {
+            const mapFiltersToFields = (filtersObj) => {
+                if (!filtersObj) return { cols: '', vals: '' };
+                const columns = Object.keys(filtersObj);
+                const cols = columns.join(', ');
+                const vals = columns.map(col => (filtersObj[col] || []).join(', ')).join('\n');
+                return { cols, vals };
+            };
+            const prodMap = mapFiltersToFields(pairData.prod_row_filters);
+            const devMap = mapFiltersToFields(pairData.dev_row_filters);
+            const extended = {
+                ...pairData,
+                prod_filter_columns: prodMap.cols,
+                prod_filter_values: prodMap.vals,
+                dev_filter_columns: devMap.cols,
+                dev_filter_values: devMap.vals
+            };
+            const pairHTML = createTablePairHTML(index, extended);
+            container.insertAdjacentHTML('beforeend', pairHTML);
+        });
+    } else {
+        if (availableTables.length > 0) {
+            const defaultPair = {
+                prod_table: availableTables[0][0],
+                dev_table: availableTables[0][0],
+                display_name: availableTables[0][1],
+                prod_primary_keys: availableTables[0][2],
+                dev_primary_keys: availableTables[0][3],
+                ignored_columns: availableTables[0][4],
+                ignore_prod_pks: false,
+                ignore_dev_pks: false
+            };
+            const pairHTML = createTablePairHTML(0, defaultPair);
+            container.insertAdjacentHTML('beforeend', pairHTML);
+        } else {
+            const pairHTML = createTablePairHTML(0);
+            container.insertAdjacentHTML('beforeend', pairHTML);
+        }
+    }
+    updateUI();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    initializeTablePairs();
+    document.getElementById('comparisonForm').addEventListener('submit', function(e) {
+        if (!validateForm()) {
+            e.preventDefault();
+            return false;
+        }
+        const btn = document.getElementById('compareBtn');
+        const count = document.querySelectorAll('.table-pair-item').length;
+        if (count === 1) {
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Starting Single Comparison...';
+        } else {
+            btn.innerHTML = `<i class=\"fas fa-spinner fa-spin me-2\"></i>Starting Batch Comparison (${count} tables)...`;
+        }
+        btn.disabled = true;
+    });
+});
+</script>
+{% endblock %}

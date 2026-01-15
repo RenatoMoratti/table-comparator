@@ -1,0 +1,25 @@
+.venv/
+.env
+.env.*
+
+# Editor metadata
+.cursor/
+
+# Local (non-committed) app settings
+data/local_connection_settings.json
+data/flask_secret_key.txt
+
+__pycache__/
+*.py[cod]
+*.pyd
+
+build/
+dist/
+*.egg-info/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+.DS_Store
+Thumbs.db
