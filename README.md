@@ -42,7 +42,7 @@ This application allows Data Analysts and Engineers to quickly identify schema d
 
 ### 1. Clone the repository
 ```bash
-git clone [https://github.com/YOUR_USERNAME/table-comparator.git](https://github.com/YOUR_USERNAME/table-comparator.git)
+git clone https://github.com/RenatoMoratti/table-comparator
 cd table-comparator
 ```
 
